@@ -1242,12 +1242,12 @@ class LeggedRobot(BaseTask):
         # 初始化障碍物assets字典
         self.gate_assets = {}
         self.h_hurdle_assets = {}
-        
+
         # 如果terrain中有程序化H型栏杆，创建对应的assets
-        if hasattr(self, 'terrain') and hasattr(self.terrain, 'h_hurdles_dict'):
+        if hasattr(self, "terrain") and hasattr(self.terrain, "h_hurdles_dict"):
             if self.terrain.h_hurdles_dict:
                 self._create_h_hurdle_assets()
-        
+
         asset_path = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
         asset_root = os.path.dirname(asset_path)
         asset_file = os.path.basename(asset_path)
@@ -1363,7 +1363,7 @@ class LeggedRobot(BaseTask):
             self.actor_handles.append(anymal_handle)
 
             # 添加程序化H型栏杆（如果存在）
-            if hasattr(self, 'terrain') and hasattr(self.terrain, 'h_hurdles_dict'):
+            if hasattr(self, "terrain") and hasattr(self.terrain, "h_hurdles_dict"):
                 if self.terrain.h_hurdles_dict:
                     self._add_h_hurdle_static_geometry(env_handle, i)
 
@@ -1590,7 +1590,7 @@ class LeggedRobot(BaseTask):
     def _create_h_hurdle_assets(self):
         """创建程序化H型栏杆的几何体assets"""
         print("Creating procedural H-shaped hurdle assets...")
-        
+
         # 扫描所有环境，找出需要的所有配置组合
         hurdle_configs = set()
         for hurdles in self.terrain.h_hurdles_dict.values():
@@ -1600,28 +1600,30 @@ class LeggedRobot(BaseTask):
                     round(hurdle["leg_length"], 2),
                 )
                 hurdle_configs.add(config)
-        
+
         # 为每种配置创建assets
         asset_options = gymapi.AssetOptions()
         asset_options.density = 1000.0
         asset_options.fix_base_link = True
         asset_options.disable_gravity = True
-        
+
         for height, leg_length in hurdle_configs:
             # 获取第一个具有此配置的hurdle来获取详细参数
             sample_hurdle = None
             for hurdles in self.terrain.h_hurdles_dict.values():
                 for hurdle in hurdles:
-                    if (round(hurdle["height"], 2) == height and 
-                        round(hurdle["leg_length"], 2) == leg_length):
+                    if (
+                        round(hurdle["height"], 2) == height
+                        and round(hurdle["leg_length"], 2) == leg_length
+                    ):
                         sample_hurdle = hurdle
                         break
                 if sample_hurdle:
                     break
-            
+
             if not sample_hurdle:
                 continue
-                
+
             # 创建各组件assets
             # 1. 顶部横杆（水平圆柱）
             top_bar_radius = sample_hurdle["top_bar"]["radius"]
@@ -1629,26 +1631,26 @@ class LeggedRobot(BaseTask):
             top_bar_asset = self.gym.create_capsule(
                 self.sim, top_bar_radius, top_bar_length, asset_options
             )
-            
+
             # 2. 立柱（垂直圆柱）
             leg_radius = sample_hurdle["legs"]["radius"]
             leg_asset = self.gym.create_capsule(
                 self.sim, leg_radius, leg_length, asset_options
             )
-            
+
             # 3. 底座（长方体）
             foot_size = sample_hurdle["feet"]["box_size"]
             foot_asset = self.gym.create_box(
                 self.sim, foot_size[0], foot_size[1], foot_size[2], asset_options
             )
-            
+
             # 4. 底部连接杆（水平圆柱）
             connector_radius = sample_hurdle["foot_connector"]["radius"]
             connector_length = sample_hurdle["foot_connector"]["length"]
             connector_asset = self.gym.create_capsule(
                 self.sim, connector_radius, connector_length, asset_options
             )
-            
+
             # 存储assets
             config_key = (height, leg_length)
             self.h_hurdle_assets[config_key] = {
@@ -1658,7 +1660,7 @@ class LeggedRobot(BaseTask):
                 "connector": connector_asset,
                 "params": sample_hurdle,  # 保存参数用于后续创建
             }
-        
+
         print(f"Created {len(self.h_hurdle_assets)} H-hurdle asset configurations")
 
     def _add_h_hurdle_static_geometry(self, env_handle, env_id):
@@ -1666,109 +1668,114 @@ class LeggedRobot(BaseTask):
         # 获取当前环境的地形坐标
         row = self.terrain_levels[env_id].item()
         col = self.terrain_types[env_id].item()
-        
+
         # 获取当前环境的H型栏杆列表
         hurdles = self.terrain.h_hurdles_dict.get((row, col), [])
-        
+
         if not hurdles:
             return
-        
+
         for hurdle_idx, hurdle_info in enumerate(hurdles):
             height = hurdle_info["height"]
             leg_length = hurdle_info["leg_length"]
             x = hurdle_info["x"]
             y = hurdle_info["y"]
             z = hurdle_info["z"]
-            
+
             # 获取对应的assets
             config_key = (round(height, 2), round(leg_length, 2))
             if config_key not in self.h_hurdle_assets:
                 continue
-            
+
             assets = self.h_hurdle_assets[config_key]
             params = hurdle_info
-            
+
             # 从URDF文件结构计算各组件位置
             # 参考H_hurdel_200.urdf的joint定义
             leg_spacing = params["legs"]["spacing"]  # 两条立柱间距
             top_bar_length = params["top_bar"]["length"]
-            
+
             # 底座和立柱的相对位置（基于URDF文件）
             foot_height = params["feet"]["box_size"][2]
-            foot_offset_x = params["feet"]["box_size"][0] / 2.0 - 0.075  # URDF中foot的origin offset
-            
+            foot_offset_x = (
+                params["feet"]["box_size"][0] / 2.0 - 0.075
+            )  # URDF中foot的origin offset
+
             # 1. 左侧底座
             left_foot_pos = gymapi.Vec3(
-                x + foot_offset_x,
-                y - leg_spacing / 2.0,
-                z + foot_height / 2.0
+                x + foot_offset_x, y - leg_spacing / 2.0, z + foot_height / 2.0
             )
             self._add_obstacle_geometry(
-                env_handle, assets["foot"], left_foot_pos,
-                gymapi.Quat(0, 0, 0, 1), params["feet"]["color"]
+                env_handle,
+                assets["foot"],
+                left_foot_pos,
+                gymapi.Quat(0, 0, 0, 1),
+                params["feet"]["color"],
             )
-            
+
             # 2. 右侧底座
             right_foot_pos = gymapi.Vec3(
-                x + foot_offset_x,
-                y + leg_spacing / 2.0,
-                z + foot_height / 2.0
+                x + foot_offset_x, y + leg_spacing / 2.0, z + foot_height / 2.0
             )
             self._add_obstacle_geometry(
-                env_handle, assets["foot"], right_foot_pos,
-                gymapi.Quat(0, 0, 0, 1), params["feet"]["color"]
+                env_handle,
+                assets["foot"],
+                right_foot_pos,
+                gymapi.Quat(0, 0, 0, 1),
+                params["feet"]["color"],
             )
-            
+
             # 3. 左立柱（垂直）
             left_leg_pos = gymapi.Vec3(
-                x,
-                y - leg_spacing / 2.0,
-                z + foot_height + leg_length / 2.0
+                x, y - leg_spacing / 2.0, z + foot_height + leg_length / 2.0
             )
             self._add_obstacle_geometry(
-                env_handle, assets["leg"], left_leg_pos,
-                gymapi.Quat(0, 0, 0, 1), params["legs"]["color"]
+                env_handle,
+                assets["leg"],
+                left_leg_pos,
+                gymapi.Quat(0, 0, 0, 1),
+                params["legs"]["color"],
             )
-            
+
             # 4. 右立柱（垂直）
             right_leg_pos = gymapi.Vec3(
-                x,
-                y + leg_spacing / 2.0,
-                z + foot_height + leg_length / 2.0
+                x, y + leg_spacing / 2.0, z + foot_height + leg_length / 2.0
             )
             self._add_obstacle_geometry(
-                env_handle, assets["leg"], right_leg_pos,
-                gymapi.Quat(0, 0, 0, 1), params["legs"]["color"]
+                env_handle,
+                assets["leg"],
+                right_leg_pos,
+                gymapi.Quat(0, 0, 0, 1),
+                params["legs"]["color"],
             )
-            
+
             # 5. 顶部横杆（水平，沿Y轴）
             # 需要旋转90度使capsule沿Y轴
             import math
+
             top_bar_quat = gymapi.Quat.from_axis_angle(
                 gymapi.Vec3(1, 0, 0), math.pi / 2
             )
-            top_bar_pos = gymapi.Vec3(
-                x,
-                y,
-                z + foot_height + leg_length
-            )
+            top_bar_pos = gymapi.Vec3(x, y, z + foot_height + leg_length)
             self._add_obstacle_geometry(
-                env_handle, assets["top_bar"], top_bar_pos,
-                top_bar_quat, params["top_bar"]["color"]
+                env_handle,
+                assets["top_bar"],
+                top_bar_pos,
+                top_bar_quat,
+                params["top_bar"]["color"],
             )
-            
+
             # 6. 底部连接杆（水平，沿Y轴，连接两个底座）
             connector_quat = gymapi.Quat.from_axis_angle(
                 gymapi.Vec3(1, 0, 0), math.pi / 2
             )
-            connector_pos = gymapi.Vec3(
-                x + foot_offset_x,
-                y,
-                z + foot_height / 2.0
-            )
+            connector_pos = gymapi.Vec3(x + foot_offset_x, y, z + foot_height / 2.0)
             self._add_obstacle_geometry(
-                env_handle, assets["connector"], connector_pos,
-                connector_quat, params["foot_connector"]["color"]
+                env_handle,
+                assets["connector"],
+                connector_pos,
+                connector_quat,
+                params["foot_connector"]["color"],
             )
 
     def _add_obstacle_geometry(self, env_handle, asset, pos, quat, color):
@@ -1783,11 +1790,14 @@ class LeggedRobot(BaseTask):
             0,
             0,
         )
-        
+
         # 设置颜色
         self.gym.set_rigid_body_color(
-            env_handle, actor_handle, 0, gymapi.MESH_VISUAL,
-            gymapi.Vec3(color[0], color[1], color[2])
+            env_handle,
+            actor_handle,
+            0,
+            gymapi.MESH_VISUAL,
+            gymapi.Vec3(color[0], color[1], color[2]),
         )
 
     def _get_env_origins(self):

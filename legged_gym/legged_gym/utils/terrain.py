@@ -1544,16 +1544,16 @@ def h_hurdle_procedural_terrain(
 ):
     """
     生成完整的H型栏杆地形（程序化创建复合对象，类似URDF结构）
-    
+
     这个函数创建类似于URDF文件中描述的H型栏杆：
     1. 顶部横杆（水平圆柱，长0.7m，半径0.008m）
     2. 两根立柱（垂直圆柱，根据高度调整长度，半径0.008m）
     3. 两个底座（长方体，0.35×0.03×0.03m）
     4. 底部连接杆（水平圆柱，长0.6m，半径0.005m）
-    
+
     在Isaac Gym中，这些组件将作为单个复合对象（composite object）创建，
     而不是使用URDF文件，从而提高效率。
-    
+
     Parameters:
         terrain: 地形对象
         platform_len (float): 起始平台长度 [米]
@@ -1571,35 +1571,35 @@ def h_hurdle_procedural_terrain(
     if total_goals is None:
         total_goals = num_hurdles + 2
     goals = np.zeros((total_goals, 2))
-    
+
     # 保持地形平坦
     terrain.height_field_raw[:] = 0
-    
+
     mid_y = terrain.length // 2
-    
+
     # 转换范围到像素单位
     dis_x_min = round(x_range[0] / terrain.horizontal_scale)
     dis_x_max = round(x_range[1] / terrain.horizontal_scale)
     dis_y_min = round(y_range[0] / terrain.horizontal_scale)
     dis_y_max = round(y_range[1] / terrain.horizontal_scale)
-    
+
     platform_len_px = round(platform_len / terrain.horizontal_scale)
     platform_height_int = round(platform_height / terrain.vertical_scale)
     terrain.height_field_raw[0:platform_len_px, :] = platform_height_int
-    
+
     dis_x = platform_len_px
     goals[0] = [platform_len_px - 1, mid_y]
-    
+
     # 可用的栏杆高度
     available_heights = [0.2, 0.3, 0.4, 0.5]
     if progressive_heights:
         progressive_sequence = [0.2, 0.3, 0.4, 0.5]
     else:
         progressive_sequence = None
-    
+
     # 初始化H型栏杆位置信息列表
     h_hurdles = []
-    
+
     # H型栏杆的组件尺寸（基于URDF文件）
     top_bar_radius = 0.008  # 顶部横杆半径
     top_bar_length = 0.7  # 顶部横杆长度
@@ -1607,7 +1607,7 @@ def h_hurdle_procedural_terrain(
     foot_box_size = [0.35, 0.03, 0.03]  # 底座尺寸 [长, 宽, 高]
     foot_connector_radius = 0.005  # 底部连接杆半径
     foot_connector_length = 0.6  # 底部连接杆长度
-    
+
     for i in range(num_hurdles):
         # 计算下一个栏杆位置
         rand_x = (
@@ -1617,7 +1617,7 @@ def h_hurdle_procedural_terrain(
         )
         dis_x += rand_x
         rand_y = np.random.randint(dis_y_min, dis_y_max) if dis_y_max > dis_y_min else 0
-        
+
         # 选择栏杆高度
         if progressive_heights and i < len(progressive_sequence):
             hurdle_height = progressive_sequence[i]
@@ -1628,7 +1628,7 @@ def h_hurdle_procedural_terrain(
             if not valid_heights:
                 valid_heights = available_heights
             hurdle_height = np.random.choice(valid_heights)
-        
+
         # 根据不同高度计算立柱长度（基于URDF文件的结构）
         # H_hurdel_200: 立柱长0.2m, H_hurdel_300: 0.3m, H_hurdel_400: 0.4m, H_hurdel_500: 未指定
         if hurdle_height <= 0.2:
@@ -1639,12 +1639,12 @@ def h_hurdle_procedural_terrain(
             leg_length = 0.4
         else:
             leg_length = 0.5  # 假设50cm高度对应0.5m立柱
-        
+
         # 计算栏杆在世界坐标系中的位置（米）
         hurdle_x = dis_x * terrain.horizontal_scale
         hurdle_y = (mid_y + rand_y) * terrain.horizontal_scale
         hurdle_z = 0.0  # 地面高度
-        
+
         # 存储H型栏杆信息
         # 每个H型栏杆由多个几何体组成，在legged_robot.py中会被创建为一个复合对象
         hurdle_info = {
@@ -1676,10 +1676,10 @@ def h_hurdle_procedural_terrain(
             },
         }
         h_hurdles.append(hurdle_info)
-        
+
         # 设置目标点（在栏杆中心）
         goals[i + 1] = [dis_x, mid_y + rand_y]
-    
+
     # 最后一个目标点
     final_rand_x = (
         np.random.randint(dis_x_min, dis_x_max) if dis_x_max > dis_x_min else dis_x_min
@@ -1688,17 +1688,17 @@ def h_hurdle_procedural_terrain(
     if final_dis_x > terrain.width:
         final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
     goals[num_hurdles + 1] = [final_dis_x, mid_y]
-    
+
     # 填充剩余目标点
     for i in range(num_hurdles + 2, total_goals):
         goals[i] = [final_dis_x, mid_y]
-    
+
     # 转换目标点到米
     terrain.goals = goals * terrain.horizontal_scale
-    
+
     # 存储H型栏杆信息（供legged_robot.py使用）
     terrain.h_hurdles = h_hurdles
-    
+
     # 边缘填充
     pad_width_px = int(pad_width // terrain.horizontal_scale)
     pad_height_px = int(pad_height // terrain.vertical_scale)
