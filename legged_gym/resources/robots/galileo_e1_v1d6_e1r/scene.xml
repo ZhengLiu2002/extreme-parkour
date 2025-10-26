@@ -1,0 +1,74 @@
+<mujoco model="e1_v1d6_e1r scene">
+  <include file="e1_v1d6_e1r.xml"/>
+
+  <statistic center="0 0 0.1" extent="0.8"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-130" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <hfield name="terrain_hf" file="terrain/stairs_platform.png" size="4.1 4.1 2.0 0.0001"/>
+    <!-- <mesh name = "stair" file = "terrain/stair.STL" scale = '1 1 1' />
+    <mesh name = "slope" file = "terrain/slope.STL" scale = '1 1 1' /> -->
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5"/>
+
+    <geom name="floor2" type="box" size="100 100 0.0001" pos="0 0 0" material="groundplane" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <!-- 中央平台 -->
+    <geom name="platform" type="box" size="1.500 1.500 0.100" pos="5.000 0.000 2.100" rgba="0.7 0.7 0.7 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <!-- front 边台阶 -->
+    <geom name="step_front_1" type="box" size="1.500 0.130 0.100" pos="5.000 1.630 1.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_2" type="box" size="1.500 0.130 0.100" pos="5.000 1.890 1.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_3" type="box" size="1.500 0.130 0.100" pos="5.000 2.150 1.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_4" type="box" size="1.500 0.130 0.100" pos="5.000 2.410 1.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_5" type="box" size="1.500 0.130 0.100" pos="5.000 2.670 1.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_6" type="box" size="1.500 0.130 0.100" pos="5.000 2.930 0.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_7" type="box" size="1.500 0.130 0.100" pos="5.000 3.190 0.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_8" type="box" size="1.500 0.130 0.100" pos="5.000 3.450 0.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_9" type="box" size="1.500 0.130 0.100" pos="5.000 3.710 0.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_front_10" type="box" size="1.500 0.130 0.100" pos="5.000 3.970 0.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <!-- back 边台阶 -->
+    <geom name="step_back_1" type="box" size="1.500 0.130 0.100" pos="5.000 -1.630 1.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_2" type="box" size="1.500 0.130 0.100" pos="5.000 -1.890 1.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_3" type="box" size="1.500 0.130 0.100" pos="5.000 -2.150 1.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_4" type="box" size="1.500 0.130 0.100" pos="5.000 -2.410 1.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_5" type="box" size="1.500 0.130 0.100" pos="5.000 -2.670 1.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_6" type="box" size="1.500 0.130 0.100" pos="5.000 -2.930 0.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_7" type="box" size="1.500 0.130 0.100" pos="5.000 -3.190 0.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_8" type="box" size="1.500 0.130 0.100" pos="5.000 -3.450 0.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_9" type="box" size="1.500 0.130 0.100" pos="5.000 -3.710 0.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_back_10" type="box" size="1.500 0.130 0.100" pos="5.000 -3.970 0.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <!-- left 边台阶 -->
+    <geom name="step_left_1" type="box" size="0.130 1.500 0.100" pos="3.370 0.000 1.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_2" type="box" size="0.130 1.500 0.100" pos="3.110 0.000 1.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_3" type="box" size="0.130 1.500 0.100" pos="2.850 0.000 1.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_4" type="box" size="0.130 1.500 0.100" pos="2.590 0.000 1.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_5" type="box" size="0.130 1.500 0.100" pos="2.330 0.000 1.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_6" type="box" size="0.130 1.500 0.100" pos="2.070 0.000 0.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_7" type="box" size="0.130 1.500 0.100" pos="1.810 0.000 0.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_8" type="box" size="0.130 1.500 0.100" pos="1.550 0.000 0.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_9" type="box" size="0.130 1.500 0.100" pos="1.290 0.000 0.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_left_10" type="box" size="0.130 1.500 0.100" pos="1.030 0.000 0.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <!-- right 边台阶 -->
+    <geom name="step_right_1" type="box" size="0.130 1.500 0.100" pos="6.630 0.000 1.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_2" type="box" size="0.130 1.500 0.100" pos="6.890 0.000 1.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_3" type="box" size="0.130 1.500 0.100" pos="7.150 0.000 1.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_4" type="box" size="0.130 1.500 0.100" pos="7.410 0.000 1.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_5" type="box" size="0.130 1.500 0.100" pos="7.670 0.000 1.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_6" type="box" size="0.130 1.500 0.100" pos="7.930 0.000 0.900" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_7" type="box" size="0.130 1.500 0.100" pos="8.190 0.000 0.700" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_8" type="box" size="0.130 1.500 0.100" pos="8.450 0.000 0.500" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_9" type="box" size="0.130 1.500 0.100" pos="8.710 0.000 0.300" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+    <geom name="step_right_10" type="box" size="0.130 1.500 0.100" pos="8.970 0.000 0.100" rgba="0.8 0.8 0.8 1" contype = "1" conaffinity="1" condim = "3" friction = "0.5 0.5" />
+
+  </worldbody>
+</mujoco>

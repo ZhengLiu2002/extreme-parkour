@@ -1,0 +1,299 @@
+<mujoco model = "galileo_e1_v1d6_e1r">
+    <compiler angle = 'radian' eulerseq = "XYZ" meshdir = "meshes/" autolimits = "true" />
+
+    <option timestep = "0.001" />
+    <option cone="elliptic" impratio="100"/>
+
+    <default>
+        <geom contype = "2" conaffinity = "4" solref = "0.005 1" condim = "3" friction = "0.5 0.5" />
+        <equality solref = "0.005 1" />
+        <default class = "collision">
+            <geom contype = "1" group = "3" />
+            <default class = "collision-left">
+                <geom contype = "2" conaffinity = "4" />
+            </default>
+            <default class = "collision-right">
+                <geom contype = "4" conaffinity = "2" />
+            </default>
+        </default>
+    </default>
+
+    <asset>
+        <mesh name = "base_link_mesh_visual" file = "meshes_simplify/TRUCK.STL" scale = '1 1 1' />
+        <mesh name = "base_link_mesh_collision" file = "meshes_simplify/TRUCK.STL" scale = '1 1 1' />
+        <mesh name = "FL_hip_mesh_visual" file = "meshes_simplify/FL_HIP.STL" scale = '1 1 1' />
+        <mesh name = "FL_hip_mesh_collision" file = "meshes_simplify/FL_HIP.STL" scale = '1 1 1' />
+        <mesh name = "FL_thigh_mesh_visual" file = "meshes_simplify/FL_THIGH.STL" scale = '1 1 1' />
+        <mesh name = "FL_thigh_mesh_collision" file = "meshes_simplify/FL_THIGH.STL" scale = '1 1 1' />
+        <mesh name = "FL_calf_mesh_visual" file = "meshes_simplify/FL_CALF.STL" scale = '1 1 1' />
+        <mesh name = "FL_calf_mesh_collision" file = "meshes_simplify/FL_CALF.STL" scale = '1 1 1' />
+        <mesh name = "RL_hip_mesh_visual" file = "meshes_simplify/RL_HIP.STL" scale = '1 1 1' />
+        <mesh name = "RL_hip_mesh_collision" file = "meshes_simplify/RL_HIP.STL" scale = '1 1 1' />
+        <mesh name = "RL_thigh_mesh_visual" file = "meshes_simplify/FL_THIGH.STL" scale = '1 1 1' />
+        <mesh name = "RL_thigh_mesh_collision" file = "meshes_simplify/FL_THIGH.STL" scale = '1 1 1' />
+        <mesh name = "RL_calf_mesh_visual" file = "meshes_simplify/FL_CALF.STL" scale = '1 1 1' />
+        <mesh name = "RL_calf_mesh_collision" file = "meshes_simplify/FL_CALF.STL" scale = '1 1 1' />
+        <mesh name = "FR_hip_mesh_visual" file = "meshes_simplify/FL_HIP.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "FR_hip_mesh_collision" file = "meshes_simplify/FL_HIP.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "FR_thigh_mesh_visual" file = "meshes_simplify/FL_THIGH.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "FR_thigh_mesh_collision" file = "meshes_simplify/FL_THIGH.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "FR_calf_mesh_visual" file = "meshes_simplify/FL_CALF.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "FR_calf_mesh_collision" file = "meshes_simplify/FL_CALF.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_hip_mesh_visual" file = "meshes_simplify/RL_HIP.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_hip_mesh_collision" file = "meshes_simplify/RL_HIP.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_thigh_mesh_visual" file = "meshes_simplify/FL_THIGH.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_thigh_mesh_collision" file = "meshes_simplify/FL_THIGH.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_calf_mesh_visual" file = "meshes_simplify/FL_CALF.STL" scale = '1.0 -1.0 1.0' />
+        <mesh name = "RR_calf_mesh_collision" file = "meshes_simplify/FL_CALF.STL" scale = '1.0 -1.0 1.0' />
+        <!-- asset auto generate -->
+    </asset>
+
+    <worldbody>
+        <light name = "spotlight" mode = "targetbodycom" target = "base_link" pos = "0 -1 2" />
+
+        <body name = 'base_link' pos = '0 0 2.0' euler = '0 0 0'>
+            <inertial pos = "0.0094498 -0.0090544 0.0024967" mass = "19.9426357" fullinertia = "0.12497 0.576588 0.6287693 0.0004594 -0.0137517 -0.0004353" />
+            <freejoint />
+            <site name = "imu" size = "0.01" pos = "0 0 0" />
+            <body name = 'body_lidar' pos = '0 0 0' euler = '0 0 0'>
+                <geom contype = "1" conaffinity = "1" type = 'sphere' size = '0.01' pos = '0 0 0' euler = '0 0 0' />
+                <site name = "e1r_front" size = "0.01" type='sphere' pos = '0.43018 0.0 0.02301' euler = '0 0.523598767 0' />
+                <site name = "e1r_back" size = "0.01" type='sphere' pos = '-0.44386 0.0001 -0.01934' euler = '0 0.523598767 3.1415926' />
+                <site name = "mid360_up" size = "0.01" type='sphere' pos = '0.3398 0.0 0.125' euler = '0 0 0' />
+            </body>
+            <geom type = 'mesh' mesh = 'base_link_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "0.8 0.4 0 1" />
+            <geom type = 'mesh' mesh = 'base_link_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+            <!-- base_link site geom -->
+
+            <body name = 'FL_hip' pos = '0.279 0.067 0' euler = '0 0 0'>
+                <inertial pos = "-0.0034539 0.0001471 -0.0009605" mass = "1.6459372" fullinertia = "0.0004144 0.000796 0.0005767 1e-05 1.5e-06 -1.4e-06" />
+                <joint name = 'FL_hip_joint' type = 'hinge' axis = '1 0 0' limited='true' range='-0.698132 0.698132' damping = '0.5' />
+                <geom type = 'mesh' mesh = 'FL_hip_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.4 0.4 1" />
+                <geom type = 'mesh' mesh = 'FL_hip_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                <!-- FL_hip site geom -->
+
+                <body name = 'FL_thigh' pos = '0 0.1103 0' euler = '0 0 0'>
+                    <inertial pos = "-0.0028001 -0.0368096 -0.0239021" mass = "2.2115554" fullinertia = "0.012133 0.0117725 0.0019164 0.0002099 -0.000542 0.0020399" />
+                    <joint name = 'FL_thigh_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-1.762783 3.647738' damping = '0.5' />
+                    <geom type = 'mesh' mesh = 'FL_thigh_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 1 0.4 1" />
+                    <geom type = 'mesh' mesh = 'FL_thigh_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                    <geom type = 'box' size = '0.025 0.01 0.09' pos = '-0.025 0 -0.15' euler = '0 0 0' rgba = "0 0.5 1 0" />
+                    <!-- FL_thigh site geom -->
+
+                    <body name = 'FL_calf' pos = '0 0 -0.26' euler = '0 0 0'>
+                        <inertial pos = "0.006276 6e-05 -0.1458107" mass = "0.3248308" fullinertia = "0.0041942 0.0042423 9.93e-05 0 -3e-07 0" />
+                        <joint name = 'FL_calf_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-2.740167 -0.383972' damping = '0.5' />
+                        <geom type = 'mesh' mesh = 'FL_calf_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "0.4 1 0.4 1" />
+                        <geom type = 'mesh' mesh = 'FL_calf_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                        <geom type = 'box' size = '0.02 0.01 0.025' pos = '0.015 0.0 -0.235' euler = '0 0.5 0' rgba = "0 0.5 1 0" />
+                        <geom type = 'box' size = '0.016 0.01 0.135' pos = '0.0085 0.0 -0.092' euler = '0 -0.15 0' rgba = "0 0.5 1 0" />
+                        <!-- FL_calf site geom -->
+
+                        <body name = 'FL_foot' pos = '0 0 -0.26' euler = '0 0 0'>
+                            <inertial pos = "0 0 0" mass = "0.000204873572147578" fullinertia = "1.09600066619755e-09 1.09600066619755e-09 1.09600066619755e-09 0 0 0" />
+                            <!-- FL_foot joint -->
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' rgba = "0 0.5 1 1" />
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                            <!-- FL_foot site geom -->
+                            <!-- FL_foot child body -->
+                        </body>
+                        <!-- FL_calf child body -->
+                    </body>
+                    <!-- FL_thigh child body -->
+                </body>
+                <!-- FL_hip child body -->
+            </body>
+
+            <body name = 'RL_hip' pos = '-0.279 0.067 0' euler = '0 0 0'>
+                <inertial pos = "-0.0034539 0.0001471 -0.0009605" mass = "1.6459372" fullinertia = "0.0004144 0.000796 0.0005767 -1e-05 -1.5e-06 -1.4e-06" />
+                <joint name = 'RL_hip_joint' type = 'hinge' axis = '1 0 0' limited='true' range='-0.698132 0.698132' damping = '0.5' />
+                <geom type = 'mesh' mesh = 'RL_hip_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "0.8 1.0 0.8 1" />
+                <geom type = 'mesh' mesh = 'RL_hip_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                <!-- RL_hip site geom -->
+
+                <body name = 'RL_thigh' pos = '0 0.1103 0' euler = '0 0 0'>
+                    <inertial pos = "-0.0028001 -0.0368096 -0.0239021" mass = "2.2115554" fullinertia = "0.012133 0.0117725 0.0019164 0.0002099 -0.000542 0.0020399" />
+                    <joint name = 'RL_thigh_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-1.762783 3.647738' damping = '0.5' />
+                    <geom type = 'mesh' mesh = 'RL_thigh_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.5 1 1" />
+                    <geom type = 'mesh' mesh = 'RL_thigh_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                    <geom type = 'box' size = '0.025 0.01 0.09' pos = '-0.025 0 -0.15' euler = '0 0 0' rgba = "0 0.5 1 0" />
+                    <!-- RL_thigh site geom -->
+
+                    <body name = 'RL_calf' pos = '0 0 -0.26' euler = '0 0 0'>
+                        <inertial pos = "0.006276 6e-05 -0.1458107" mass = "0.3248308" fullinertia = "0.0041942 0.0042423 9.93e-05 0 -3e-07 0" />
+                        <joint name = 'RL_calf_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-2.740167 -0.383972' damping = '0.5' />
+                        <geom type = 'mesh' mesh = 'RL_calf_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.4 0.4 1" />
+                        <geom type = 'mesh' mesh = 'RL_calf_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                        <geom type = 'box' size = '0.02 0.01 0.025' pos = '0.015 0.0 -0.235' euler = '0 0.5 0' rgba = "0 0.5 1 0" />
+                        <geom type = 'box' size = '0.016 0.01 0.135' pos = '0.0085 0.0 -0.092' euler = '0 -0.15 0' rgba = "0 0.5 1 0" />
+                        <!-- RL_calf site geom -->
+
+                        <body name = 'RL_foot' pos = '0 0 -0.26' euler = '0 0 0'>
+                            <inertial pos = "0 0 0" mass = "0.000204873572147578" fullinertia = "1.09600066619755e-09 1.09600066619755e-09 1.09600066619755e-09 0 0 0" />
+                            <!-- RL_foot joint -->
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' rgba = "1 1 0.4 1" />
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                            <!-- RL_foot site geom -->
+                            <!-- RL_foot child body -->
+                        </body>
+                        <!-- RL_calf child body -->
+                    </body>
+                    <!-- RL_thigh child body -->
+                </body>
+                <!-- RL_hip child body -->
+            </body>
+
+            <body name = 'FR_hip' pos = '0.279 -0.067 0.0' euler = '-0.0 0.0 -0.0'>
+                <inertial pos = "-0.0034539 -0.0001471 -0.0009605" mass = "1.6459372" fullinertia = "0.0004144 0.000796 0.0005767 -1e-05 1.5e-06 1.4e-06" />
+                <joint name = 'FR_hip_joint' type = 'hinge' axis = '1 0 0' limited='true' range='-0.698132 0.698132' damping = '0.5' />
+                <geom type = 'mesh' mesh = 'FR_hip_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.4 0.4 1" />
+                <geom type = 'mesh' mesh = 'FR_hip_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                <!-- FR_hip site geom -->
+
+                <body name = 'FR_thigh' pos = '0.0 -0.1103 0.0' euler = '-0.0 0.0 -0.0'>
+                    <inertial pos = "-0.0028001 0.0368096 -0.0239021" mass = "2.2115554" fullinertia = "0.012133 0.0117725 0.0019164 -0.0002099 -0.000542 -0.0020399" />
+                    <joint name = 'FR_thigh_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-1.762783 3.647738' damping = '0.5' />
+                    <geom type = 'mesh' mesh = 'FR_thigh_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 1 0.4 1" />
+                    <geom type = 'mesh' mesh = 'FR_thigh_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                    <geom type = 'box' size = '0.025 0.01 0.09' pos = '-0.025 0 -0.15' euler = '0 0 0' rgba = "0 0.5 1 0" />
+                    <!-- FR_thigh site geom -->
+
+                    <body name = 'FR_calf' pos = '0.0 -0.0 -0.26' euler = '-0.0 0.0 -0.0'>
+                        <inertial pos = "0.006276 -6e-05 -0.1458107" mass = "0.3248308" fullinertia = "0.0041942 0.0042423 9.93e-05 -0.0 -3e-07 -0.0" />
+                        <joint name = 'FR_calf_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-2.740167 -0.383972' damping = '0.5' />
+                        <geom type = 'mesh' mesh = 'FR_calf_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "0.4 1 0.4 1" />
+                        <geom type = 'mesh' mesh = 'FR_calf_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                        <geom type = 'box' size = '0.02 0.01 0.025' pos = '0.015 0.0 -0.235' euler = '0 0.5 0' rgba = "0 0.5 1 0" />
+                        <geom type = 'box' size = '0.016 0.01 0.135' pos = '0.0085 0.0 -0.092' euler = '0 -0.15 0' rgba = "0 0.5 1 0" />
+                        <!-- FR_calf site geom -->
+
+                        <body name = 'FR_foot' pos = '0.0 -0.0 -0.26' euler = '-0.0 0.0 -0.0'>
+                            <inertial pos = "0.0 -0.0 0.0" mass = "0.000204873572147578" fullinertia = "1.09600066619755e-09 1.09600066619755e-09 1.09600066619755e-09 -0.0 0.0 -0.0" />
+                            <!-- FR_foot joint -->
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' rgba = "0 0.5 1 1" />
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                            <!-- FR_foot site geom -->
+                            <!-- FR_foot child body -->
+                        </body>
+                        <!-- FR_calf child body -->
+                    </body>
+                    <!-- FR_thigh child body -->
+                </body>
+                <!-- FR_hip child body -->
+            </body>
+
+            <body name = 'RR_hip' pos = '-0.279 -0.067 0.0' euler = '-0.0 0.0 -0.0'>
+                <inertial pos = "-0.0034539 -0.0001471 -0.0009605" mass = "1.6459372" fullinertia = "0.0004144 0.000796 0.0005767 1e-05 -1.5e-06 1.4e-06" />
+                <joint name = 'RR_hip_joint' type = 'hinge' axis = '1 0 0' limited='true' range='-0.698132 0.698132' damping = '0.5' />
+                <geom type = 'mesh' mesh = 'RR_hip_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "0.8 1.0 0.8 1" />
+                <geom type = 'mesh' mesh = 'RR_hip_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                <!-- RR_hip site geom -->
+
+                <body name = 'RR_thigh' pos = '0.0 -0.1103 0.0' euler = '-0.0 0.0 -0.0'>
+                    <inertial pos = "-0.0028001 0.0368096 -0.0239021" mass = "2.2115554" fullinertia = "0.012133 0.0117725 0.0019164 -0.0002099 -0.000542 -0.0020399" />
+                    <joint name = 'RR_thigh_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-1.762783 3.647738' damping = '0.5' />
+                    <geom type = 'mesh' mesh = 'RR_thigh_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.5 1 1" />
+                    <geom type = 'mesh' mesh = 'RR_thigh_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                    <geom type = 'box' size = '0.025 0.01 0.09' pos = '-0.025 0 -0.15' euler = '0 0 0' rgba = "0 0.5 1 0" />
+                    <!-- RR_thigh site geom -->
+
+                    <body name = 'RR_calf' pos = '0.0 -0.0 -0.26' euler = '-0.0 0.0 -0.0'>
+                        <inertial pos = "0.006276 -6e-05 -0.1458107" mass = "0.3248308" fullinertia = "0.0041942 0.0042423 9.93e-05 -0.0 -3e-07 -0.0" />
+                        <joint name = 'RR_calf_joint' type = 'hinge' axis = '0 1 0' limited='true' range='-2.740167 -0.383972' damping = '0.5' />
+                        <geom type = 'mesh' mesh = 'RR_calf_mesh_visual' pos = '0 0 0' euler = '0 0 0' rgba = "1 0.4 0.4 1" />
+                        <geom type = 'mesh' mesh = 'RR_calf_mesh_collision' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                        <geom type = 'box' size = '0.02 0.01 0.025' pos = '0.015 0.0 -0.235' euler = '0 0.5 0' rgba = "0 0.5 1 0" />
+                        <geom type = 'box' size = '0.016 0.01 0.135' pos = '0.0085 0.0 -0.092' euler = '0 -0.15 0' rgba = "0 0.5 1 0" />
+                        <!-- RR_calf site geom -->
+
+                        <body name = 'RR_foot' pos = '0.0 -0.0 -0.26' euler = '-0.0 0.0 -0.0'>
+                            <inertial pos = "0.0 -0.0 0.0" mass = "0.000204873572147578" fullinertia = "1.09600066619755e-09 1.09600066619755e-09 1.09600066619755e-09 -0.0 0.0 -0.0" />
+                            <!-- RR_foot joint -->
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' rgba = "1 1 0.4 1" />
+                            <geom type = 'sphere' size = '0.026' pos = '0 0 0' euler = '0 0 0' class = "collision" />
+                            <!-- RR_foot site geom -->
+                            <!-- RR_foot child body -->
+                        </body>
+                        <!-- RR_calf child body -->
+                    </body>
+                    <!-- RR_thigh child body -->
+                </body>
+                <!-- RR_hip child body -->
+            </body>
+            <!-- base_link child body -->
+        </body>
+        <!-- world child body -->
+    </worldbody>
+
+    <actuator>
+        <motor name = 'motor_FL_hip_joint' joint = 'FL_hip_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_FL_thigh_joint' joint = 'FL_thigh_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_FL_calf_joint' joint = 'FL_calf_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RL_hip_joint' joint = 'RL_hip_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RL_thigh_joint' joint = 'RL_thigh_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RL_calf_joint' joint = 'RL_calf_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_FR_hip_joint' joint = 'FR_hip_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_FR_thigh_joint' joint = 'FR_thigh_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_FR_calf_joint' joint = 'FR_calf_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RR_hip_joint' joint = 'RR_hip_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RR_thigh_joint' joint = 'RR_thigh_joint' ctrlrange = '-120 120' />
+        <motor name = 'motor_RR_calf_joint' joint = 'RR_calf_joint' ctrlrange = '-120 120' />
+        <!-- actuator auto generate -->
+    </actuator>
+
+    <sensor>
+        <jointpos name = 'jointpos_FL_hip_joint' joint = 'FL_hip_joint'/>
+        <jointvel name = 'jointvel_FL_hip_joint' joint = 'FL_hip_joint'/>
+
+        <jointpos name = 'jointpos_FL_thigh_joint' joint = 'FL_thigh_joint'/>
+        <jointvel name = 'jointvel_FL_thigh_joint' joint = 'FL_thigh_joint'/>
+
+        <jointpos name = 'jointpos_FL_calf_joint' joint = 'FL_calf_joint'/>
+        <jointvel name = 'jointvel_FL_calf_joint' joint = 'FL_calf_joint'/>
+
+        <jointpos name = 'jointpos_RL_hip_joint' joint = 'RL_hip_joint'/>
+        <jointvel name = 'jointvel_RL_hip_joint' joint = 'RL_hip_joint'/>
+
+        <jointpos name = 'jointpos_RL_thigh_joint' joint = 'RL_thigh_joint'/>
+        <jointvel name = 'jointvel_RL_thigh_joint' joint = 'RL_thigh_joint'/>
+
+        <jointpos name = 'jointpos_RL_calf_joint' joint = 'RL_calf_joint'/>
+        <jointvel name = 'jointvel_RL_calf_joint' joint = 'RL_calf_joint'/>
+
+        <jointpos name = 'jointpos_FR_hip_joint' joint = 'FR_hip_joint'/>
+        <jointvel name = 'jointvel_FR_hip_joint' joint = 'FR_hip_joint'/>
+
+        <jointpos name = 'jointpos_FR_thigh_joint' joint = 'FR_thigh_joint'/>
+        <jointvel name = 'jointvel_FR_thigh_joint' joint = 'FR_thigh_joint'/>
+
+        <jointpos name = 'jointpos_FR_calf_joint' joint = 'FR_calf_joint'/>
+        <jointvel name = 'jointvel_FR_calf_joint' joint = 'FR_calf_joint'/>
+
+        <jointpos name = 'jointpos_RR_hip_joint' joint = 'RR_hip_joint'/>
+        <jointvel name = 'jointvel_RR_hip_joint' joint = 'RR_hip_joint'/>
+
+        <jointpos name = 'jointpos_RR_thigh_joint' joint = 'RR_thigh_joint'/>
+        <jointvel name = 'jointvel_RR_thigh_joint' joint = 'RR_thigh_joint'/>
+
+        <jointpos name = 'jointpos_RR_calf_joint' joint = 'RR_calf_joint'/>
+        <jointvel name = 'jointvel_RR_calf_joint' joint = 'RR_calf_joint'/>
+
+        <!-- sensor auto generate -->
+    </sensor>
+    <!--
+    <equality>
+        <connect name = '' body1 = '' body2 = '' solimp = '0.9999 0.9999 0.001 0.5 2' anchor = '0 0 0' />
+    </equality>
+    -->
+    <sensor>
+        <framequat name="body-orientation" objtype="site" objname="imu"/>
+        <gyro name="body-angular-velocity" site="imu"/>
+        <framepos name="body-linear-pos" objtype="site" objname="imu"/>
+        <velocimeter name="body-linear-vel" site="imu"/>
+        <accelerometer name="body-linear-acceleration" site="imu"/>
+    </sensor>
+
+    <keyframe>
+        <key name="home" qpos="0 0 0.36 1 0 0 0 0.0 0.84 -1.61 0.0 0.84 -1.61 0.0 0.84 -1.61 0.0 0.84 -1.61"/>
+    </keyframe>
+</mujoco>
