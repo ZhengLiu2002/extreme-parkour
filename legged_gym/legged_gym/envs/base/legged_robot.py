@@ -1667,17 +1667,18 @@ class LeggedRobot(BaseTask):
                 vertical=True,
             )
 
-            # 创建顶部横梁（水平圆柱体，底部与立柱顶端平齐）
+            # 创建顶部横梁（长方体）
             # 横梁中心应该在立柱顶端 + 横梁半径的位置
             crossbar_center_z = z + crossbar_height + crossbar_radius
             crossbar_pos = gymapi.Vec3(x, y, crossbar_center_z)
-            self._add_cylinder_geometry(
+            # 横梁作为长方体：横梁长度方向为Y轴，高度为2*radius（直径），宽度为2*radius（直径）
+            self._add_box_geometry(
                 env_handle,
                 crossbar_pos,
-                crossbar_radius,
-                crossbar_length,
+                crossbar_length,  # Y轴方向（长度）
+                2 * crossbar_radius,  # Z轴方向（高度）
+                2 * crossbar_radius,  # X轴方向（宽度）
                 crossbar_color,
-                vertical=False,
             )
 
             # 创建底部横杆（如果有的话，用来绊倒机器人）
@@ -1747,6 +1748,45 @@ class LeggedRobot(BaseTask):
         actor_handle = self.gym.create_actor(
             env_handle,
             cylinder_asset,
+            pose,
+            "h_hurdle_static",
+            self.num_envs + 1,  # 使用不同的collision group避免干扰
+            0,  # collision filter
+            0,  # segmentation id
+        )
+
+        # 设置颜色
+        self.gym.set_rigid_body_color(
+            env_handle, actor_handle, 0, gymapi.MESH_VISUAL, color
+        )
+
+    def _add_box_geometry(self, env_handle, pos, length_y, length_z, length_x, color):
+        """添加一个长方体几何到环境中（作为静态障碍）
+
+        Args:
+            env_handle: 环境句柄
+            pos: 长方体中心位置
+            length_y: Y轴方向长度（横梁的长度方向）
+            length_z: Z轴方向长度（高度）
+            length_x: X轴方向长度（宽度）
+            color: 颜色 (Vec3)
+        """
+        pose = gymapi.Transform(pos, gymapi.Quat(0, 0, 0, 1))
+
+        # 创建长方体asset
+        asset_options = gymapi.AssetOptions()
+        asset_options.fix_base_link = True
+        asset_options.disable_gravity = True
+        asset_options.density = 1000.0
+
+        box_asset = self.gym.create_box(
+            self.sim, length_x, length_y, length_z, asset_options
+        )
+
+        # 创建actor
+        actor_handle = self.gym.create_actor(
+            env_handle,
+            box_asset,
             pose,
             "h_hurdle_static",
             self.num_envs + 1,  # 使用不同的collision group避免干扰

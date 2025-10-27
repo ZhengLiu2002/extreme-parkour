@@ -770,8 +770,8 @@ def h_hurdle_terrain(
     pad_width=0.1,
     pad_height=0.5,
     progressive_heights=True,
-    post_spacing=0.6,
-    crossbar_inset=0.05,
+    post_spacing=0.7,
+    crossbar_inset=0.0,
 ):
 
     # 初始化目标点数组（保持数组大小一致，用于Isaac Gym环境）
@@ -809,9 +809,11 @@ def h_hurdle_terrain(
     h_hurdles = []
 
     # 几何体组件尺寸定义
-    post_radius = 0.05  # 立柱半径 [米]
-    crossbar_radius = 0.03  # 横梁半径 [米]
-    crossbar_length = post_spacing - 2 * crossbar_inset  # 横梁长度（扣除两端的缩进）
+    post_radius = 0.008  # 立柱半径 [米]
+    post_distance = 0.5  # 横梁距离 [米]
+
+    crossbar_radius = 0.005  # 横梁半径 [米]
+    crossbar_length = post_spacing  # 横梁长度（扣除两端的缩进）
 
     for i in range(num_hurdles):
         # 计算下一个栏杆的X坐标位置
@@ -843,13 +845,15 @@ def h_hurdle_terrain(
         hurdle_z = 0.0  # 地面高度
 
         # 计算立柱位置（沿Y轴分布）
-        left_post_y = hurdle_y - post_spacing / 2  # 左侧立柱
-        right_post_y = hurdle_y + post_spacing / 2  # 右侧立柱
+        left_post_y = hurdle_y - post_distance / 2  # 左侧立柱
+        right_post_y = hurdle_y + post_distance / 2  # 右侧立柱
 
         # 底部横杆参数
-        bottom_bar_height = 0.01  # 底部横杆高度（10cm，用来绊倒机器人）
-        bottom_bar_offset_x = 0.0  # 底部横杆在X轴前移8cm（避免与立柱连接成墙）
-        bottom_bar_radius = 0.01  # 底部横杆半径（2cm）
+        bottom_bar_height = 0.05  # 底部横杆高度（5cm，用来绊倒机器人）
+        bottom_bar_offset_x = 0.0  # 底部横杆在X轴前移0cm（避免与立柱连接成墙）
+        bottom_bar_radius = 0.005  # 底部横杆半径（1cm）
+        bottom_bar_length = 0.4  # 底部横杆长度（500mm）
+        crossbar_height = hurdle_height + post_radius
 
         # 存储H型栏杆的完整几何信息
         hurdle_info = {
@@ -870,14 +874,14 @@ def h_hurdle_terrain(
             "crossbar": {
                 "radius": crossbar_radius,
                 "length": crossbar_length,  # 横梁长度（小于立柱间距）
-                "height": hurdle_height,  # 横梁Z坐标（与立柱顶端平齐）
+                "height": crossbar_height,  # 横梁Z坐标（与立柱顶端平齐）
                 "inset": crossbar_inset,  # 横梁向内缩进距离
                 "color": [0.8, 0.2, 0.2],  # 红色
             },
-            # 底部横杆信息（用来绊倒机器人，稍微前移避免与立柱连接）
+            # 底部横杆信息（用来绊倒机器人，与横梁平行）
             "bottom_bar": {
                 "radius": bottom_bar_radius,
-                "length": crossbar_length,  # 与顶部横梁长度相同
+                "length": bottom_bar_length,  # 与顶部横梁长度相同
                 "height": bottom_bar_height,  # 距离地面10cm
                 "offset_x": bottom_bar_offset_x,  # 在X轴前移8cm
                 "color": [0.2, 0.8, 0.2],  # 绿色
