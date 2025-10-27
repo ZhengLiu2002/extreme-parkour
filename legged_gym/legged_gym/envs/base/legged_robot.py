@@ -845,6 +845,7 @@ class LeggedRobot(BaseTask):
         else:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
+
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -859,6 +860,7 @@ class LeggedRobot(BaseTask):
         self.root_states[:, 7:9] = torch_rand_float(
             -max_vel, max_vel, (self.num_envs, 2), device=self.device
         )  # lin vel x/y
+
         self.gym.set_actor_root_state_tensor(
             self.sim, gymtorch.unwrap_tensor(self.root_states)
         )
@@ -919,7 +921,25 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_force_sensor_tensor(self.sim)
 
         # create some wrapper tensors for different slices
-        self.root_states = gymtorch.wrap_tensor(actor_root_state)
+        all_root_states = gymtorch.wrap_tensor(actor_root_state)
+
+        # 计算每个环境的actors数量（如果有H型栏杆，会有额外的actors）
+        self.num_actors = all_root_states.shape[0] // self.num_envs
+        print(f"每个环境有 {self.num_actors} 个actors")
+
+        # 如果每个环境有多个actors，重塑为(num_envs, num_actors, 13)
+        # 然后只使用第一个actor（机器人）的状态
+        if self.num_actors > 1:
+            # 保存所有actors的状态
+            self.all_root_states = all_root_states.view(
+                self.num_envs, self.num_actors, 13
+            )
+            # root_states只包含机器人的状态，保持向后兼容
+            self.root_states = self.all_root_states[:, 0, :]
+        else:
+            self.all_root_states = all_root_states
+            self.root_states = all_root_states
+
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state_tensor).view(
             self.num_envs, -1, 13
         )
@@ -1239,15 +1259,6 @@ class LeggedRobot(BaseTask):
            2.3 create actor with these properties and add them to the env
         3. Store indices of different bodies of the robot
         """
-        # 初始化障碍物assets字典
-        self.gate_assets = {}
-        self.h_hurdle_assets = {}
-
-        # 如果terrain中有程序化H型栏杆，创建对应的assets
-        if hasattr(self, "terrain") and hasattr(self.terrain, "h_hurdles_dict"):
-            if self.terrain.h_hurdles_dict:
-                self._create_h_hurdle_assets()
-
         asset_path = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
         asset_root = os.path.dirname(asset_path)
         asset_file = os.path.basename(asset_path)
@@ -1362,11 +1373,6 @@ class LeggedRobot(BaseTask):
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
 
-            # 添加程序化H型栏杆（如果存在）
-            if hasattr(self, "terrain") and hasattr(self.terrain, "h_hurdles_dict"):
-                if self.terrain.h_hurdles_dict:
-                    self._add_h_hurdle_static_geometry(env_handle, i)
-
             self.attach_camera(i, env_handle, anymal_handle)
 
             self.mass_params_tensor[i, :] = (
@@ -1435,6 +1441,13 @@ class LeggedRobot(BaseTask):
         )
         for i, name in enumerate(calf_names):
             self.calf_indices[i] = self.dof_names.index(name)
+
+        # 在所有环境创建完成后，添加H型栏杆静态几何体
+        if hasattr(self.terrain, "h_hurdles_dict") and self.terrain.h_hurdles_dict:
+            print("Adding H-shaped hurdles to environments...")
+            for i in range(self.num_envs):
+                self._add_h_hurdle_static_geometry(self.envs[i], i)
+            print(f"H-shaped hurdles added to {self.num_envs} environments")
 
     def _create_gate_assets(self):
         """创建门框几何体assets（立柱和横梁）"""
@@ -1587,217 +1600,163 @@ class LeggedRobot(BaseTask):
             env_handle, actor_handle, 0, gymapi.MESH_VISUAL, color
         )
 
-    def _create_h_hurdle_assets(self):
-        """创建程序化H型栏杆的几何体assets"""
-        print("Creating procedural H-shaped hurdle assets...")
-
-        # 扫描所有环境，找出需要的所有配置组合
-        hurdle_configs = set()
-        for hurdles in self.terrain.h_hurdles_dict.values():
-            for hurdle in hurdles:
-                config = (
-                    round(hurdle["height"], 2),
-                    round(hurdle["leg_length"], 2),
-                )
-                hurdle_configs.add(config)
-
-        # 为每种配置创建assets
-        asset_options = gymapi.AssetOptions()
-        asset_options.density = 1000.0
-        asset_options.fix_base_link = True
-        asset_options.disable_gravity = True
-
-        for height, leg_length in hurdle_configs:
-            # 获取第一个具有此配置的hurdle来获取详细参数
-            sample_hurdle = None
-            for hurdles in self.terrain.h_hurdles_dict.values():
-                for hurdle in hurdles:
-                    if (
-                        round(hurdle["height"], 2) == height
-                        and round(hurdle["leg_length"], 2) == leg_length
-                    ):
-                        sample_hurdle = hurdle
-                        break
-                if sample_hurdle:
-                    break
-
-            if not sample_hurdle:
-                continue
-
-            # 创建各组件assets
-            # 1. 顶部横杆（水平圆柱）
-            top_bar_radius = sample_hurdle["top_bar"]["radius"]
-            top_bar_length = sample_hurdle["top_bar"]["length"]
-            top_bar_asset = self.gym.create_capsule(
-                self.sim, top_bar_radius, top_bar_length, asset_options
-            )
-
-            # 2. 立柱（垂直圆柱）
-            leg_radius = sample_hurdle["legs"]["radius"]
-            leg_asset = self.gym.create_capsule(
-                self.sim, leg_radius, leg_length, asset_options
-            )
-
-            # 3. 底座（长方体）
-            foot_size = sample_hurdle["feet"]["box_size"]
-            foot_asset = self.gym.create_box(
-                self.sim, foot_size[0], foot_size[1], foot_size[2], asset_options
-            )
-
-            # 4. 底部连接杆（水平圆柱）
-            connector_radius = sample_hurdle["foot_connector"]["radius"]
-            connector_length = sample_hurdle["foot_connector"]["length"]
-            connector_asset = self.gym.create_capsule(
-                self.sim, connector_radius, connector_length, asset_options
-            )
-
-            # 存储assets
-            config_key = (height, leg_length)
-            self.h_hurdle_assets[config_key] = {
-                "top_bar": top_bar_asset,
-                "leg": leg_asset,
-                "foot": foot_asset,
-                "connector": connector_asset,
-                "params": sample_hurdle,  # 保存参数用于后续创建
-            }
-
-        print(f"Created {len(self.h_hurdle_assets)} H-hurdle asset configurations")
-
     def _add_h_hurdle_static_geometry(self, env_handle, env_id):
-        """在指定环境中添加程序化H型栏杆"""
+        """在指定环境中添加H型栏杆静态几何体"""
         # 获取当前环境的地形坐标
         row = self.terrain_levels[env_id].item()
         col = self.terrain_types[env_id].item()
 
         # 获取当前环境的H型栏杆列表
-        hurdles = self.terrain.h_hurdles_dict.get((row, col), [])
+        h_hurdles = self.terrain.h_hurdles_dict.get((row, col), [])
 
-        if not hurdles:
+        if not h_hurdles:
             return
 
-        for hurdle_idx, hurdle_info in enumerate(hurdles):
-            height = hurdle_info["height"]
-            leg_length = hurdle_info["leg_length"]
+        for hurdle_info in h_hurdles:
             x = hurdle_info["x"]
             y = hurdle_info["y"]
             z = hurdle_info["z"]
+            height = hurdle_info["height"]
+            post_spacing = hurdle_info["post_spacing"]
 
-            # 获取对应的assets
-            config_key = (round(height, 2), round(leg_length, 2))
-            if config_key not in self.h_hurdle_assets:
-                continue
+            # 立柱信息
+            posts = hurdle_info["posts"]
+            post_radius = posts["radius"]
+            post_height = posts["height"]
+            left_post_y = posts["left_y"]
+            right_post_y = posts["right_y"]
+            post_color = gymapi.Vec3(*posts["color"])
 
-            assets = self.h_hurdle_assets[config_key]
-            params = hurdle_info
+            # 横梁信息
+            crossbar = hurdle_info["crossbar"]
+            crossbar_radius = crossbar["radius"]
+            crossbar_length = crossbar["length"]
+            crossbar_height = crossbar["height"]
+            crossbar_color = gymapi.Vec3(*crossbar["color"])
 
-            # 从URDF文件结构计算各组件位置
-            # 参考H_hurdel_200.urdf的joint定义
-            leg_spacing = params["legs"]["spacing"]  # 两条立柱间距
-            top_bar_length = params["top_bar"]["length"]
+            # 底部横杆信息（如果有）
+            if "bottom_bar" in hurdle_info:
+                bottom_bar = hurdle_info["bottom_bar"]
+                bottom_bar_radius = bottom_bar["radius"]
+                bottom_bar_length = bottom_bar["length"]
+                bottom_bar_height = bottom_bar["height"]
+                bottom_bar_offset_x = bottom_bar["offset_x"]
+                bottom_bar_color = gymapi.Vec3(*bottom_bar["color"])
+            else:
+                bottom_bar = None
 
-            # 底座和立柱的相对位置（基于URDF文件）
-            foot_height = params["feet"]["box_size"][2]
-            foot_offset_x = (
-                params["feet"]["box_size"][0] / 2.0 - 0.075
-            )  # URDF中foot的origin offset
-
-            # 1. 左侧底座
-            left_foot_pos = gymapi.Vec3(
-                x + foot_offset_x, y - leg_spacing / 2.0, z + foot_height / 2.0
-            )
-            self._add_obstacle_geometry(
+            # 创建左立柱（圆柱体）
+            left_post_pos = gymapi.Vec3(x, left_post_y, z + post_height / 2.0)
+            self._add_cylinder_geometry(
                 env_handle,
-                assets["foot"],
-                left_foot_pos,
-                gymapi.Quat(0, 0, 0, 1),
-                params["feet"]["color"],
+                left_post_pos,
+                post_radius,
+                post_height,
+                post_color,
+                vertical=True,
             )
 
-            # 2. 右侧底座
-            right_foot_pos = gymapi.Vec3(
-                x + foot_offset_x, y + leg_spacing / 2.0, z + foot_height / 2.0
-            )
-            self._add_obstacle_geometry(
+            # 创建右立柱（圆柱体）
+            right_post_pos = gymapi.Vec3(x, right_post_y, z + post_height / 2.0)
+            self._add_cylinder_geometry(
                 env_handle,
-                assets["foot"],
-                right_foot_pos,
-                gymapi.Quat(0, 0, 0, 1),
-                params["feet"]["color"],
+                right_post_pos,
+                post_radius,
+                post_height,
+                post_color,
+                vertical=True,
             )
 
-            # 3. 左立柱（垂直）
-            left_leg_pos = gymapi.Vec3(
-                x, y - leg_spacing / 2.0, z + foot_height + leg_length / 2.0
-            )
-            self._add_obstacle_geometry(
+            # 创建顶部横梁（水平圆柱体，底部与立柱顶端平齐）
+            # 横梁中心应该在立柱顶端 + 横梁半径的位置
+            crossbar_center_z = z + crossbar_height + crossbar_radius
+            crossbar_pos = gymapi.Vec3(x, y, crossbar_center_z)
+            self._add_cylinder_geometry(
                 env_handle,
-                assets["leg"],
-                left_leg_pos,
-                gymapi.Quat(0, 0, 0, 1),
-                params["legs"]["color"],
+                crossbar_pos,
+                crossbar_radius,
+                crossbar_length,
+                crossbar_color,
+                vertical=False,
             )
 
-            # 4. 右立柱（垂直）
-            right_leg_pos = gymapi.Vec3(
-                x, y + leg_spacing / 2.0, z + foot_height + leg_length / 2.0
-            )
-            self._add_obstacle_geometry(
-                env_handle,
-                assets["leg"],
-                right_leg_pos,
-                gymapi.Quat(0, 0, 0, 1),
-                params["legs"]["color"],
-            )
+            # 创建底部横杆（如果有的话，用来绊倒机器人）
+            if bottom_bar is not None:
+                # 底部横杆中心在指定高度 + 半径，使其底部接近地面
+                bottom_bar_center_z = z + bottom_bar_height + bottom_bar_radius
+                bottom_bar_pos = gymapi.Vec3(
+                    x + bottom_bar_offset_x,  # 稍微前移，避免与立柱连接
+                    y,
+                    bottom_bar_center_z,
+                )
+                self._add_cylinder_geometry(
+                    env_handle,
+                    bottom_bar_pos,
+                    bottom_bar_radius,
+                    bottom_bar_length,
+                    bottom_bar_color,
+                    vertical=False,
+                )
 
-            # 5. 顶部横杆（水平，沿Y轴）
-            # 需要旋转90度使capsule沿Y轴
-            import math
+    def _add_cylinder_geometry(
+        self, env_handle, pos, radius, length, color, vertical=True
+    ):
+        """添加一个圆柱体几何到环境中（作为静态障碍，不创建actor）
 
-            top_bar_quat = gymapi.Quat.from_axis_angle(
-                gymapi.Vec3(1, 0, 0), math.pi / 2
-            )
-            top_bar_pos = gymapi.Vec3(x, y, z + foot_height + leg_length)
-            self._add_obstacle_geometry(
-                env_handle,
-                assets["top_bar"],
-                top_bar_pos,
-                top_bar_quat,
-                params["top_bar"]["color"],
-            )
+        Args:
+            env_handle: 环境句柄
+            pos: 圆柱体中心位置
+            radius: 圆柱体半径
+            length: 圆柱体长度
+            color: 颜色 (Vec3)
+            vertical: 是否垂直放置（True=垂直Z轴，False=水平Y轴）
+        """
+        # Isaac Gym的capsule默认是沿X轴（机器人运动方向）的
+        if vertical:
+            # 垂直圆柱体（沿Z轴）- 从X轴旋转到Z轴，需要绕Y轴旋转90度
+            # 使用四元数：绕Y轴旋转90度
+            angle = np.pi / 2
+            axis = gymapi.Vec3(0, 1, 0)  # Y轴
+            quat = gymapi.Quat.from_axis_angle(axis, angle)
+        else:
+            # 水平圆柱体（沿Y轴，垂直于运动方向）- 从X轴旋转到Y轴，需要绕Z轴旋转90度
+            # 使用四元数：绕Z轴旋转90度
+            angle = np.pi / 2
+            axis = gymapi.Vec3(0, 0, 1)  # Z轴
+            quat = gymapi.Quat.from_axis_angle(axis, angle)
 
-            # 6. 底部连接杆（水平，沿Y轴，连接两个底座）
-            connector_quat = gymapi.Quat.from_axis_angle(
-                gymapi.Vec3(1, 0, 0), math.pi / 2
-            )
-            connector_pos = gymapi.Vec3(x + foot_offset_x, y, z + foot_height / 2.0)
-            self._add_obstacle_geometry(
-                env_handle,
-                assets["connector"],
-                connector_pos,
-                connector_quat,
-                params["foot_connector"]["color"],
-            )
-
-    def _add_obstacle_geometry(self, env_handle, asset, pos, quat, color):
-        """添加一个障碍物几何体到环境中"""
         pose = gymapi.Transform(pos, quat)
+
+        # 使用add_ground_geometry添加静态几何体（不会增加actor数量）
+        # 注意：这需要在heightfield/trimesh地形上添加
+        # 由于capsule不支持add_ground_geometry，我们需要用多个box来近似圆柱体
+        # 或者使用actor但放在特殊的collision filter group
+
+        # 方案：使用actor但确保collision group设置正确，不影响机器人的tensor
+        asset_options = gymapi.AssetOptions()
+        asset_options.fix_base_link = True
+        asset_options.disable_gravity = True
+        asset_options.density = 1000.0
+
+        cylinder_asset = self.gym.create_capsule(
+            self.sim, radius, length, asset_options
+        )
+
+        # 创建actor，使用collision group来隔离
+        # 注意：collision_group设置为self.num_envs可以避免与机器人碰撞计算
         actor_handle = self.gym.create_actor(
             env_handle,
-            asset,
+            cylinder_asset,
             pose,
             "h_hurdle_static",
-            self.num_envs,  # 使用num_envs作为collision group
-            0,
-            0,
+            self.num_envs + 1,  # 使用不同的collision group避免干扰
+            0,  # collision filter
+            0,  # segmentation id
         )
 
         # 设置颜色
         self.gym.set_rigid_body_color(
-            env_handle,
-            actor_handle,
-            0,
-            gymapi.MESH_VISUAL,
-            gymapi.Vec3(color[0], color[1], color[2]),
+            env_handle, actor_handle, 0, gymapi.MESH_VISUAL, color
         )
 
     def _get_env_origins(self):
@@ -2404,6 +2363,11 @@ class LeggedRobot(BaseTask):
         """
         惩罚机器人身体（base, thigh, calf）与障碍物立柱的接触
         模拟碰倒栏杆的情况
+
+        增强版：
+        1. 检测机器人身体部件位置是否接近柱子
+        2. 计算接触力大小
+        3. 根据接触力大小施加不同程度的惩罚
         """
         # 使用已定义的penalised_contact_indices（包含base, thigh, calf等）
         if (
@@ -2414,156 +2378,221 @@ class LeggedRobot(BaseTask):
 
         # 计算身体部件的接触力
         body_contact_forces = self.contact_forces[:, self.penalised_contact_indices, :]
-        contact_force_magnitude = torch.norm(body_contact_forces, dim=-1)
+        contact_force_magnitude = torch.norm(
+            body_contact_forces, dim=-1
+        )  # [num_envs, num_body_parts]
 
-        # 如果接触力超过阈值，施加惩罚
+        # 接触力阈值
         threshold = getattr(self.cfg.rewards, "obstacle_contact_force_threshold", 5.0)
-        has_contact = contact_force_magnitude > threshold
 
-        # 返回有接触的环境数（每个环境0或1）
-        penalty = torch.any(has_contact, dim=1).float()
+        # 获取机器人身体位置
+        robot_base_pos = self.root_states[:, :3]  # [num_envs, 3]
+
+        # 初始化惩罚
+        penalty = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+
+        # 检测是否接近柱子（基于virtual_crossbars信息）
+        if hasattr(self, "terrain") and hasattr(self.terrain, "virtual_crossbars"):
+            for crossbar_info in self.terrain.virtual_crossbars:
+                # 柱子中心位置
+                post_x = crossbar_info["x"]
+                post_y = crossbar_info["y"]
+                post_height = crossbar_info["height"]
+                passage_width = crossbar_info["width"]
+                post_depth = crossbar_info.get("depth", 0.12)
+
+                # 计算机器人到柱子的距离
+                for env_idx in range(self.num_envs):
+                    # 获取环境原点偏移
+                    env_origin = self.env_origins[env_idx]
+
+                    # 计算机器人相对于柱子的位置
+                    robot_x = robot_base_pos[env_idx, 0].item() - env_origin[0].item()
+                    robot_y = robot_base_pos[env_idx, 1].item() - env_origin[1].item()
+                    robot_z = robot_base_pos[env_idx, 2].item()
+
+                    # 获取配置参数
+                    proximity_threshold = getattr(
+                        self.cfg.rewards, "post_contact_proximity_threshold", 0.5
+                    )
+                    penalty_scaling = getattr(
+                        self.cfg.rewards, "contact_force_penalty_scaling", 50.0
+                    )
+                    max_penalty = getattr(
+                        self.cfg.rewards, "max_contact_force_penalty", 2.0
+                    )
+                    enable_logging = getattr(
+                        self.cfg.rewards, "enable_contact_force_logging", True
+                    )
+
+                    # 检测是否在柱子附近
+                    near_post_x = abs(robot_x - post_x) < (
+                        post_depth + proximity_threshold
+                    )
+                    near_post_y = abs(robot_y - post_y) < (passage_width / 2 + 0.3)
+                    near_post_z = robot_z < (post_height + 0.2)  # 身体低于柱子高度+0.2m
+
+                    if near_post_x and near_post_y and near_post_z:
+                        # 在柱子附近，检查是否有接触力
+                        env_contact_forces = contact_force_magnitude[
+                            env_idx
+                        ]  # [num_body_parts]
+                        has_contact = env_contact_forces > threshold
+
+                        if torch.any(has_contact):
+                            # 计算最大接触力
+                            max_contact_force = torch.max(env_contact_forces).item()
+
+                            # 根据接触力大小施加惩罚
+                            # 基础惩罚 + 接触力比例惩罚
+                            penalty[env_idx] = 1.0 + min(
+                                max_contact_force / penalty_scaling, max_penalty
+                            )
+
+                            # 可选：打印接触信息（用于调试）
+                            if (
+                                enable_logging
+                                and env_idx == 0
+                                and self.common_step_counter % 100 == 0
+                            ):
+                                print(
+                                    f"[接触检测] Env {env_idx}: 机器人与柱子接触! "
+                                    f"最大接触力={max_contact_force:.2f}N, "
+                                    f"惩罚倍数={penalty[env_idx].item():.2f}, "
+                                    f"位置=({robot_x:.2f}, {robot_y:.2f}, {robot_z:.2f}), "
+                                    f"柱子位置=({post_x:.2f}, {post_y:.2f}), "
+                                    f"柱子高度={post_height:.2f}m"
+                                )
+        else:
+            # 如果没有virtual_crossbars信息，使用简单的接触检测
+            has_contact = contact_force_magnitude > threshold
+            penalty = torch.any(has_contact, dim=1).float()
 
         return penalty
 
-    def _reward_leg_wall_contact(self):
+    def get_post_contact_forces_info(self, env_idx=0):
         """
-        惩罚腿部（thigh, calf）与墙体障碍物的接触
-        跳跃模式下，腿部不应该碰到墙体
+        获取指定环境中机器人与柱子的接触力详细信息
+
+        Args:
+            env_idx: 环境索引，默认为0
+
+        Returns:
+            dict: 包含接触力详细信息的字典
         """
-        # 使用penalised_contact_indices，它包含thigh和calf
-        # 这个函数与body_obstacle_contact类似，但用于跳跃模式
+        info = {
+            "has_contact": False,
+            "max_contact_force": 0.0,
+            "contact_body_parts": [],
+            "robot_position": None,
+            "nearest_post": None,
+            "distance_to_post": None,
+        }
+
         if (
             not hasattr(self, "penalised_contact_indices")
             or len(self.penalised_contact_indices) == 0
         ):
-            return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+            return info
 
-        # 计算身体部件（包括腿部）的接触力
-        leg_contact_forces = self.contact_forces[:, self.penalised_contact_indices, :]
-        contact_force_magnitude = torch.norm(leg_contact_forces, dim=-1)
+        # 获取身体部件接触力
+        body_contact_forces = self.contact_forces[
+            env_idx, self.penalised_contact_indices, :
+        ]
+        contact_force_magnitude = torch.norm(body_contact_forces, dim=-1)
 
-        # 接触力阈值
         threshold = getattr(self.cfg.rewards, "obstacle_contact_force_threshold", 5.0)
-        has_contact = contact_force_magnitude > threshold
 
-        # 返回有接触的环境数
-        penalty = torch.any(has_contact, dim=1).float()
+        # 获取机器人位置
+        robot_pos = self.root_states[env_idx, :3].cpu().numpy()
+        info["robot_position"] = robot_pos
 
-        return penalty
+        # 检查接触
+        has_contact_mask = contact_force_magnitude > threshold
+        if torch.any(has_contact_mask):
+            info["has_contact"] = True
+            info["max_contact_force"] = torch.max(contact_force_magnitude).item()
 
-    def _reward_jump_clearance_reward(self):
-        """
-        奖励跳跃时脚部与障碍物保持足够距离
-        检测机器人在障碍物附近时，脚的高度是否足够
-        """
-        if not hasattr(self.terrain, "gate_obstacles_dict"):
-            return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-
-        reward = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-
-        # 获取机器人基座位置
-        robot_pos = self.root_states[:, :3]
-        robot_x = robot_pos[:, 0]
-        robot_y = robot_pos[:, 1]
-
-        # 获取脚部位置
-        feet_pos = self.rigid_body_states[:, self.feet_indices, :3]  # (num_envs, 4, 3)
-
-        for env_idx in range(self.num_envs):
-            env_origin = self.env_origins[env_idx]
-            terrain_row = env_idx // self.cfg.terrain.num_cols
-            terrain_col = env_idx % self.cfg.terrain.num_cols
-
-            # 获取该环境的障碍物
-            if (terrain_row, terrain_col) not in self.terrain.gate_obstacles_dict:
-                continue
-
-            gates = self.terrain.gate_obstacles_dict[(terrain_row, terrain_col)]
-
-            # 计算相对位置
-            rel_robot_x = robot_x[env_idx] - env_origin[0]
-            rel_robot_y = robot_y[env_idx] - env_origin[1]
-
-            for gate in gates:
-                gate_x = gate["x"] - env_origin[0]
-                gate_y = gate["y"] - env_origin[1]
-                gate_height = gate["height"]
-                gate_depth = gate.get("gate_depth", 0.15)
-
-                # 检测是否在障碍物附近
-                detection_range = getattr(
-                    self.cfg.rewards, "obstacle_detection_range", 0.8
-                )
-                x_in_range = abs(rel_robot_x - gate_x) < detection_range
-                y_in_range = abs(rel_robot_y - gate_y) < 0.5
-
-                if x_in_range and y_in_range:
-                    # 检查所有脚的高度
-                    ground_z = env_origin[2]
-                    feet_heights = feet_pos[env_idx, :, 2] - ground_z
-
-                    # 计算脚部与障碍物顶部的间隙
-                    clearance_threshold = getattr(
-                        self.cfg.rewards, "jump_clearance_threshold", 0.15
+            # 找出哪些身体部件有接触
+            for i, has_contact in enumerate(has_contact_mask):
+                if has_contact:
+                    force = contact_force_magnitude[i].item()
+                    body_idx = self.penalised_contact_indices[i]
+                    body_name = (
+                        self.body_names[body_idx]
+                        if hasattr(self, "body_names")
+                        else f"body_{body_idx}"
                     )
-                    min_safe_height = gate_height + clearance_threshold
+                    info["contact_body_parts"].append(
+                        {"name": body_name, "force": force, "index": body_idx}
+                    )
 
-                    # 如果所有脚都高于安全高度，给予奖励
-                    all_feet_safe = torch.all(feet_heights > min_safe_height)
-                    if all_feet_safe:
-                        reward[env_idx] += 1.0
+        # 查找最近的柱子
+        if hasattr(self, "terrain") and hasattr(self.terrain, "virtual_crossbars"):
+            env_origin = self.env_origins[env_idx].cpu().numpy()
+            robot_x = robot_pos[0] - env_origin[0]
+            robot_y = robot_pos[1] - env_origin[1]
 
-        return reward
+            min_distance = float("inf")
+            nearest_post = None
 
-    def _reward_jump_height_reward(self):
+            for crossbar_info in self.terrain.virtual_crossbars:
+                post_x = crossbar_info["x"]
+                post_y = crossbar_info["y"]
+
+                # 计算到柱子中心的距离
+                distance = np.sqrt((robot_x - post_x) ** 2 + (robot_y - post_y) ** 2)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_post = {
+                        "position": (post_x, post_y),
+                        "height": crossbar_info["height"],
+                        "width": crossbar_info["width"],
+                        "depth": crossbar_info.get("depth", 0.12),
+                    }
+
+            info["nearest_post"] = nearest_post
+            info["distance_to_post"] = min_distance
+
+        return info
+
+    def print_contact_forces_summary(self, num_envs=1):
         """
-        奖励在接近墙体障碍物时跳跃达到足够高度
+        打印多个环境的接触力摘要信息
+
+        Args:
+            num_envs: 要打印的环境数量
         """
-        if not hasattr(self.terrain, "gate_obstacles_dict"):
-            return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        print("\n" + "=" * 80)
+        print("机器人与柱子接触力摘要")
+        print("=" * 80)
 
-        reward = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        for env_idx in range(min(num_envs, self.num_envs)):
+            info = self.get_post_contact_forces_info(env_idx)
 
-        # 获取机器人基座位置和高度
-        robot_pos = self.root_states[:, :3]
-        robot_x = robot_pos[:, 0]
-        robot_y = robot_pos[:, 1]
-        robot_z = robot_pos[:, 2]
+            print(f"\n环境 {env_idx}:")
+            print(
+                f"  机器人位置: ({info['robot_position'][0]:.2f}, "
+                f"{info['robot_position'][1]:.2f}, {info['robot_position'][2]:.2f})"
+            )
 
-        for env_idx in range(self.num_envs):
-            env_origin = self.env_origins[env_idx]
-            terrain_row = env_idx // self.cfg.terrain.num_cols
-            terrain_col = env_idx % self.cfg.terrain.num_cols
+            if info["nearest_post"]:
+                post = info["nearest_post"]
+                print(
+                    f"  最近柱子: 位置=({post['position'][0]:.2f}, {post['position'][1]:.2f}), "
+                    f"高度={post['height']:.2f}m, 距离={info['distance_to_post']:.2f}m"
+                )
 
-            if (terrain_row, terrain_col) not in self.terrain.gate_obstacles_dict:
-                continue
+            if info["has_contact"]:
+                print(f"  ⚠️ 检测到接触! 最大接触力: {info['max_contact_force']:.2f} N")
+                print(f"  接触部件:")
+                for part in info["contact_body_parts"]:
+                    print(f"    - {part['name']}: {part['force']:.2f} N")
+            else:
+                print(f"  ✓ 无接触")
 
-            gates = self.terrain.gate_obstacles_dict[(terrain_row, terrain_col)]
-
-            rel_robot_x = robot_x[env_idx] - env_origin[0]
-            rel_robot_y = robot_y[env_idx] - env_origin[1]
-
-            for gate in gates:
-                gate_x = gate["x"] - env_origin[0]
-                gate_y = gate["y"] - env_origin[1]
-                gate_height = gate["height"]
-
-                # 仅在接近障碍物时检测
-                x_distance = abs(rel_robot_x - gate_x)
-                y_in_range = abs(rel_robot_y - gate_y) < 0.5
-
-                # 在障碍物前0.5m到后0.3m范围内
-                if -0.3 < (rel_robot_x - gate_x) < 0.5 and y_in_range:
-                    ground_z = env_origin[2]
-                    robot_height = robot_z[env_idx] - ground_z
-
-                    # 如果机器人跳起高度超过障碍物，给予奖励
-                    if robot_height > gate_height:
-                        height_excess = robot_height - gate_height
-                        # 奖励适度的跳跃高度（不要过高）
-                        reward[env_idx] += min(height_excess * 2.0, 1.0)
-
-        return reward
+        print("=" * 80 + "\n")
 
     def _reward_strategy_efficiency(self):
         """
@@ -2680,27 +2709,6 @@ class LeggedRobot(BaseTask):
 
         return reward
 
-    def _reward_smooth_landing(self):
-        """
-        奖励平稳着地（跳跃后）
-        检测垂直速度和接触力
-        """
-        # 检测脚部接触
-        foot_contacts = self.contact_forces[:, self.feet_indices, 2] > 1.0
-        num_feet_contact = torch.sum(foot_contacts.float(), dim=1)
-
-        # 获取垂直速度
-        vertical_vel = torch.abs(self.base_lin_vel[:, 2])
-
-        # 奖励：多脚着地且垂直速度小
-        reward = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-
-        # 当有2个以上脚接触地面且垂直速度<0.5m/s时，认为是平稳着地
-        smooth_landing_mask = (num_feet_contact >= 2) & (vertical_vel < 0.5)
-        reward[smooth_landing_mask] = 1.0 - vertical_vel[smooth_landing_mask] / 0.5
-
-        return reward
-
     def _reward_stable_crawl(self):
         """
         奖励稳定钻行（钻过模式）
@@ -2790,15 +2798,15 @@ class LeggedRobot(BaseTask):
     def _reward_base_height_stability(self):
         """
         奖励维持合理的基座高度
-        根据当前情况（平地、钻过、跳跃）动态调整目标高度
+        根据当前情况（平地、钻过）动态调整目标高度
         """
         # 获取机器人基座高度（相对于地面）
         robot_z = self.root_states[:, 2]
 
-        # 初始化目标高度（默认为平地行走高度）
+        # 初始化目标高度（默认为钻过模式的低姿态）
         target_heights = torch.ones(
             self.num_envs, dtype=torch.float, device=self.device
-        ) * getattr(self.cfg.rewards, "base_height_target", 0.32)
+        ) * getattr(self.cfg.rewards, "base_height_target", 0.18)
 
         # 检测是否在障碍物附近，动态调整目标高度
         robot_pos = self.root_states[:, :3]
@@ -2810,8 +2818,6 @@ class LeggedRobot(BaseTask):
             hasattr(self.terrain, "virtual_crossbars")
             and len(self.terrain.virtual_crossbars) > 0
         ):
-            crawl_target = getattr(self.cfg.rewards, "base_height_crawl_target", 0.25)
-
             for env_idx in range(self.num_envs):
                 env_origin = self.env_origins[env_idx]
                 rel_robot_x = robot_x[env_idx] - env_origin[0]
@@ -2828,37 +2834,11 @@ class LeggedRobot(BaseTask):
                     y_in_range = abs(rel_robot_y - crossbar_y) < (crossbar_width / 2)
 
                     if x_distance < 1.0 and y_in_range:
-                        # 接近障碍物时，目标高度降低
-                        target_heights[env_idx] = crawl_target
+                        # 接近障碍物时，目标高度保持低姿态
+                        target_heights[env_idx] = getattr(
+                            self.cfg.rewards, "base_height_target", 0.18
+                        )
                         break
-
-        # 检查墙体障碍（跳跃模式） - 在接近时略微提高目标高度
-        if hasattr(self.terrain, "gate_obstacles_dict"):
-            jump_target = getattr(self.cfg.rewards, "base_height_jump_target", 0.45)
-
-            for env_idx in range(self.num_envs):
-                terrain_row = env_idx // self.cfg.terrain.num_cols
-                terrain_col = env_idx % self.cfg.terrain.num_cols
-
-                if (terrain_row, terrain_col) in self.terrain.gate_obstacles_dict:
-                    env_origin = self.env_origins[env_idx]
-                    gates = self.terrain.gate_obstacles_dict[(terrain_row, terrain_col)]
-
-                    rel_robot_x = robot_x[env_idx] - env_origin[0]
-                    rel_robot_y = robot_y[env_idx] - env_origin[1]
-
-                    for gate in gates:
-                        gate_x = gate["x"] - env_origin[0]
-                        gate_y = gate["y"] - env_origin[1]
-                        gate_height = gate["height"]
-
-                        x_distance = abs(rel_robot_x - gate_x)
-                        y_in_range = abs(rel_robot_y - gate_y) < 0.5
-
-                        # 在墙体前0.5-1.5米时，略微提高目标高度（准备跳跃）
-                        if 0.5 < x_distance < 1.5 and y_in_range and gate_height > 0.3:
-                            target_heights[env_idx] = jump_target
-                            break
 
         # 计算实际高度与目标高度的差异
         for env_idx in range(self.num_envs):
@@ -2918,3 +2898,71 @@ class LeggedRobot(BaseTask):
         """
         # 简单地返回全1，表示所有存活的机器人都获得奖励
         return torch.ones(self.num_envs, dtype=torch.float, device=self.device)
+
+    def _reward_base_height(self):
+        """
+        强力约束基座高度跟踪目标高度
+        这是改进版，解决z轴不稳定问题
+
+        策略：
+        1. 在障碍物附近：使用低姿态（钻过栏杆）
+        2. 在平地区域：使用自然站立高度（更稳定）
+        3. 使用强惩罚来抑制高度偏离
+        """
+        robot_z = self.root_states[:, 2]
+        ground_z = self.env_origins[:, 2]
+        current_height = robot_z - ground_z
+
+        # 获取配置的目标高度
+        low_target = getattr(
+            self.cfg.rewards, "base_height_target", 0.25
+        )  # 钻过时的低姿态
+        normal_target = getattr(
+            self.cfg.rewards, "base_height_normal", 0.35
+        )  # 平地正常高度
+
+        # 初始化目标高度为正常高度
+        target_heights = (
+            torch.ones(self.num_envs, dtype=torch.float, device=self.device)
+            * normal_target
+        )
+
+        # 检测是否在障碍物附近
+        if (
+            hasattr(self.terrain, "virtual_crossbars")
+            and len(self.terrain.virtual_crossbars) > 0
+        ):
+            robot_pos = self.root_states[:, :3]
+
+            for crossbar in self.terrain.virtual_crossbars:
+                crossbar_x = crossbar["x"]
+                crossbar_y = crossbar["y"]
+                crossbar_width = crossbar["width"]
+
+                # 向量化计算距离
+                rel_pos = robot_pos - self.env_origins
+                x_distance = torch.abs(rel_pos[:, 0] - crossbar_x)
+                y_distance = torch.abs(rel_pos[:, 1] - crossbar_y)
+
+                # 在障碍物前后2米、左右通道内使用低姿态
+                near_obstacle = (x_distance < 2.0) & (
+                    y_distance < crossbar_width / 2 + 0.2
+                )
+                target_heights[near_obstacle] = low_target
+
+        # 计算高度误差
+        height_error = torch.abs(current_height - target_heights)
+
+        # 使用更强的高斯奖励
+        reward = torch.exp(-height_error * 20.0)  # 增强系数从10到20
+
+        return reward
+
+    def _reward_no_fly(self):
+        """
+        强力惩罚z轴方向的速度（上下抖动）
+        这是解决z轴不稳定的关键
+        """
+        z_vel = self.base_lin_vel[:, 2]
+        # 使用平方惩罚，速度越大惩罚越重
+        return torch.square(z_vel)

@@ -213,264 +213,37 @@ class Terrain:
         stone_distance = 0.05 if difficulty == 0 else 0.1
         gap_size = 1.0 * difficulty
         pit_depth = 1.0 * difficulty
+        # H型栏杆地形 - 唯一的地形类型
         if choice < self.proportions[0]:
             idx = 0
-            if choice < self.proportions[0] / 2:
-                idx = 1
-                slope *= -1
-            terrain_utils.pyramid_sloped_terrain(
-                terrain, slope=slope, platform_size=3.0
-            )
-            # self.add_roughness(terrain)
-        elif choice < self.proportions[2]:
-            idx = 2
-            if choice < self.proportions[1]:
-                idx = 3
-                slope *= -1
-            terrain_utils.pyramid_sloped_terrain(
-                terrain, slope=slope, platform_size=3.0
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[4]:
-            idx = 4
-            if choice < self.proportions[3]:
-                idx = 5
-                step_height *= -1
-            terrain_utils.pyramid_stairs_terrain(
-                terrain, step_width=0.31, step_height=step_height, platform_size=3.0
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[5]:
-            idx = 6
-            num_rectangles = 20
-            rectangle_min_size = 0.5
-            rectangle_max_size = 2.0
-            terrain_utils.discrete_obstacles_terrain(
-                terrain,
-                discrete_obstacles_height,
-                rectangle_min_size,
-                rectangle_max_size,
-                num_rectangles,
-                platform_size=3.0,
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[6]:
-            idx = 7
-            stones_size = 1.5 - 1.2 * difficulty
-            # terrain_utils.stepping_stones_terrain(terrain, stone_size=stones_size, stone_distance=0.1, stone_distance_rand=0, max_height=0.04*difficulty, platform_size=2.)
-            half_sloped_terrain(
-                terrain, wall_width=4, start2center=0.5, max_height=0.00
-            )
-            stepping_stones_terrain(
-                terrain,
-                stone_size=1.5 - 0.2 * difficulty,
-                stone_distance=0.0 + 0.4 * difficulty,
-                max_height=0.2 * difficulty,
-                platform_size=1.2,
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[7]:
-            idx = 8
-            # gap_size = random.uniform(self.cfg.gap_size[0], self.cfg.gap_size[1])
-            gap_parkour_terrain(terrain, difficulty, platform_size=4)
-            self.add_roughness(terrain)
-        elif choice < self.proportions[8]:
-            idx = 9
-            self.add_roughness(terrain)
-            # pass
-        elif choice < self.proportions[9]:
-            idx = 10
-            pit_terrain(terrain, depth=pit_depth, platform_size=4.0)
-        elif choice < self.proportions[10]:
-            idx = 11
-            if self.cfg.all_vertical:
-                half_slope_difficulty = 1.0
-            else:
-                difficulty *= 1.3
-                if not self.cfg.no_flat:
-                    difficulty -= 0.1
-                if difficulty > 1:
-                    half_slope_difficulty = 1.0
-                elif difficulty < 0:
-                    self.add_roughness(terrain)
-                    terrain.slope_vector = np.array([1, 0.0, 0]).astype(np.float32)
-                    return terrain
-                else:
-                    half_slope_difficulty = difficulty
-            wall_width = 4 - half_slope_difficulty * 4
-            # terrain_utils.wall_terrain(terrain, height=1, start2center=0.7)
-            # terrain_utils.tanh_terrain(terrain, height=1.0, start2center=0.7)
-            if self.cfg.flat_wall:
-                half_sloped_terrain(
-                    terrain, wall_width=4, start2center=0.5, max_height=0.00
-                )
-            else:
-                half_sloped_terrain(
-                    terrain, wall_width=wall_width, start2center=0.5, max_height=1.5
-                )
-            max_height = terrain.height_field_raw.max()
-            top_mask = terrain.height_field_raw > max_height - 0.05
-            self.add_roughness(terrain, difficulty=1)
-            terrain.height_field_raw[top_mask] = max_height
-        elif choice < self.proportions[11]:
-            idx = 12
-            # half platform terrain
-            half_platform_terrain(terrain, max_height=0.1 + 0.4 * difficulty)
-            self.add_roughness(terrain, difficulty=1)
-        elif choice < self.proportions[13]:
-            idx = 13
-            height = 0.1 + 0.3 * difficulty
-            if choice < self.proportions[12]:
-                idx = 14
-                height *= -1
-            terrain_utils.pyramid_stairs_terrain(
-                terrain, step_width=1.0, step_height=height, platform_size=3.0
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[14]:
-            x_range = [-0.1, 0.1 + 0.3 * difficulty]  # offset to stone_len
-            y_range = [0.2, 0.3 + 0.1 * difficulty]
-            stone_len = [
-                0.9 - 0.3 * difficulty,
-                1 - 0.2 * difficulty,
-            ]  # 2 * round((0.6) / 2.0, 1)
-            incline_height = 0.25 * difficulty
-            last_incline_height = incline_height + 0.1 - 0.1 * difficulty
-            parkour_terrain(
-                terrain,
-                num_stones=self.num_goals - 2,
-                x_range=x_range,
-                y_range=y_range,
-                incline_height=incline_height,
-                stone_len=stone_len,
-                stone_width=1.0,
-                last_incline_height=last_incline_height,
-                pad_height=0,
-                pit_depth=[0.2, 1],
-            )
-            idx = 15
-            # terrain.height_field_raw[:] = 0
-            self.add_roughness(terrain)
-        elif choice < self.proportions[15]:
-            idx = 16
-            parkour_hurdle_terrain(
-                terrain,
-                num_stones=self.num_goals - 2,
-                # stone_len=0.1 + 0.3 * difficulty,
-                stone_len=0.1,
-                hurdle_height_range=[0.1 + 0.1 * difficulty, 0.35 + 0.25 * difficulty],
-                pad_height=0,
-                x_range=[1.5, 2.5],
-                # y_range=self.cfg.y_range,
-                y_range=[-0.05, 0.05],
-                half_valid_width=[0.75, 0.8],
-            )
-            # terrain.height_field_raw[:] = 0
-            self.add_roughness(terrain)
-        elif choice < self.proportions[16]:
-            idx = 17
-            parkour_hurdle_terrain(
-                terrain,
-                num_stones=self.num_goals - 2,
-                stone_len=0.1 + 0.3 * difficulty,
-                hurdle_height_range=[0.1 + 0.1 * difficulty, 0.15 + 0.15 * difficulty],
-                pad_height=0,
-                y_range=self.cfg.y_range,
-                half_valid_width=[0.45, 1],
-                flat=True,
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[17]:
-            idx = 18
-            parkour_step_terrain(
-                terrain,
-                num_stones=self.num_goals - 2,
-                step_height=0.1 + 0.35 * difficulty,
-                x_range=[0.3, 1.5],
-                y_range=self.cfg.y_range,
-                half_valid_width=[0.5, 1],
-                pad_height=0,
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[18]:
-            idx = 19
-            parkour_gap_terrain(
-                terrain,
-                num_gaps=self.num_goals - 2,
-                gap_size=0.1 + 0.7 * difficulty,
-                gap_depth=[0.2, 1],
-                pad_height=0,
-                x_range=[0.8, 1.5],
-                y_range=self.cfg.y_range,
-                half_valid_width=[0.6, 1.2],
-                # flat=True
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[19]:
-            idx = 20
-            demo_terrain(terrain)
-            self.add_roughness(terrain)
-        elif choice < self.proportions[20]:
-            idx = 21
-            # H-shaped URDF hurdle terrain with progressive heights (20, 30, 40, 50cm)
+            # H型栏杆：两根立柱 + 悬空横梁
             h_hurdle_terrain(
                 terrain,
-                num_hurdles=4,  # Fixed 4 hurdles for progressive training
-                total_goals=self.num_goals,  # Pass total goals to ensure consistent array size
-                x_range=[2.0, 2.5],  # Consistent spacing for learning
-                y_range=[2.0, 2.5],  # Center alignment for easier learning
+                num_hurdles=4,  # 4个栏杆递进训练
+                total_goals=self.num_goals,  # 确保目标点数组大小一致
+                x_range=[2.0, 2.5],  # 栏杆间距（米）
+                y_range=[0.0, 0.0],  # 完全居中
+                height_range=[0.2, 0.5],  # 横杆高度范围（200-500mm）
+                pad_height=0,
+                progressive_heights=True,  # 启用递进高度序列（20,30,40,50cm）
+                post_spacing=0.7,  # 两根立柱之间的间距70cm
+                crossbar_inset=0.05,  # 横梁向内缩进5cm
+            )
+            self.add_roughness(terrain)
+        else:
+            # 备用：如果出现意外，默认也使用h_hurdle
+            idx = 0
+            h_hurdle_terrain(
+                terrain,
+                num_hurdles=4,
+                total_goals=self.num_goals,
+                x_range=[2.0, 2.5],
+                y_range=[0.0, 0.0],
                 height_range=[0.2, 0.5],
                 pad_height=0,
-                progressive_heights=True,  # Enable progressive height sequence
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[21]:
-            idx = 22
-            # 几何体H型栏杆地形（使用几何体actors，真正镂空的门框）
-            h_hurdle_geometric_terrain(
-                terrain,
-                num_hurdles=4,  # 4个栏杆递进训练
-                total_goals=self.num_goals,  # 确保目标点数组大小一致
-                x_range=[2.0, 2.5],  # 栏杆间距（米）
-                y_range=[0.0, 0.0],  # 完全居中，确保阻挡路径
-                height_range=[0.2, 0.5],  # 高度范围
-                pad_height=0,
-                progressive_heights=True,  # 启用递进高度序列（20,30,40,50cm）
-                gate_width=0.8,  # 门框宽度80cm（给机器人足够空间）
-                gate_depth=0.10,  # 门框厚度10cm（更明显）
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[22]:
-            idx = 23
-            # 钻过模式：两根立柱 + 虚拟横杆高度约束
-            crawl_through_hurdle_terrain(
-                terrain,
-                num_hurdles=4,  # 4个栏杆递进训练
-                total_goals=self.num_goals,  # 确保目标点数组大小一致
-                x_range=[2.0, 2.5],  # 栏杆间距（米）
-                y_range=[0.0, 0.0],  # 完全居中，确保阻挡路径
-                height_range=[0.2, 0.5],  # 虚拟横杆高度范围
-                pad_height=0,
-                progressive_heights=True,  # 启用递进高度序列（20,30,40,50cm）
-                post_width=0.12,  # 立柱宽度12cm
-                post_depth=0.12,  # 立柱深度12cm
-                passage_width=0.7,  # 通道宽度70cm
-            )
-            self.add_roughness(terrain)
-        elif choice < self.proportions[23]:
-            idx = 24
-            # 跳跃模式：实心墙障碍
-            jump_over_wall_terrain(
-                terrain,
-                num_walls=4,  # 4个墙体递进训练
-                total_goals=self.num_goals,  # 确保目标点数组大小一致
-                x_range=[2.0, 2.5],  # 墙体间距（米）
-                y_range=[-0.3, 0.3],  # 允许一定Y轴偏移
-                height_range=[0.2, 0.5],  # 墙体高度范围
-                pad_height=0,
-                progressive_heights=True,  # 启用递进高度序列（20,30,40,50cm）
-                wall_depth=0.15,  # 墙体厚度15cm
-                wall_width=1.0,  # 墙体宽度1米
+                progressive_heights=True,
+                post_spacing=0.7,  # 两根立柱之间的间距70cm
+                crossbar_inset=0.05,  # 横梁向内缩进5cm
             )
             self.add_roughness(terrain)
         # np.set_printoptions(precision=2)
@@ -992,592 +765,26 @@ def h_hurdle_terrain(
     num_hurdles=4,
     total_goals=None,
     x_range=[1.5, 2.5],
-    y_range=[-0.1, 0.1],
-    height_range=[0.2, 0.5],
-    pad_width=0.1,
-    pad_height=0.5,
-    progressive_heights=True,
-):
-    """
-    Generate a terrain with H-shaped hurdles loaded from URDF files.
-    This function sets up goals and stores hurdle placement information.
-    The actual URDF hurdles will be loaded in legged_robot.py
-
-    Parameters:
-        terrain: the terrain object
-        platform_len (float): length of the starting platform [meters]
-        platform_height (float): height of the starting platform [meters]
-        num_hurdles (int): number of hurdles to place
-        total_goals (int): total number of goals (for consistent array size)
-        x_range (list): distance range between hurdles [meters]
-        y_range (list): y-axis offset range for hurdle positions [meters]
-        height_range (list): hurdle height range [meters] - chooses from [0.2, 0.3, 0.4, 0.5]
-        pad_width (float): width of edge padding [meters]
-        pad_height (float): height of edge padding [meters]
-        progressive_heights (bool): if True, use progressive heights (0.2, 0.3, 0.4, 0.5)
-    """
-    # Initialize goals array with consistent size
-    if total_goals is None:
-        total_goals = num_hurdles + 2
-    goals = np.zeros((total_goals, 2))
-
-    # Keep terrain flat
-    terrain.height_field_raw[:] = 0
-
-    mid_y = terrain.length // 2  # length is actually y width
-
-    # Convert ranges to pixel units
-    dis_x_min = round(x_range[0] / terrain.horizontal_scale)
-    dis_x_max = round(x_range[1] / terrain.horizontal_scale)
-    dis_y_min = round(y_range[0] / terrain.horizontal_scale)
-    dis_y_max = round(y_range[1] / terrain.horizontal_scale)
-
-    platform_len = round(platform_len / terrain.horizontal_scale)
-    platform_height = round(platform_height / terrain.vertical_scale)
-    terrain.height_field_raw[0:platform_len, :] = platform_height
-
-    # Initialize hurdle placement info
-    hurdle_positions = []  # Will store (x, y, z, height, urdf_file)
-
-    dis_x = platform_len
-    goals[0] = [platform_len - 1, mid_y]
-
-    # Available hurdle heights (matching URDF files)
-    # Define progressive heights if enabled
-    if progressive_heights:
-        # Fixed sequence: 20cm, 30cm, 40cm, 50cm
-        progressive_sequence = [0.2, 0.3, 0.4, 0.5]
-    else:
-        progressive_sequence = None
-
-    available_heights = [0.2, 0.3, 0.4, 0.5]
-
-    for i in range(num_hurdles):
-        # Calculate next hurdle position
-        rand_x = (
-            np.random.randint(dis_x_min, dis_x_max)
-            if dis_x_max > dis_x_min
-            else dis_x_min
-        )
-        dis_x += rand_x
-        rand_y = np.random.randint(dis_y_min, dis_y_max) if dis_y_max > dis_y_min else 0
-
-        # Select hurdle height
-        if progressive_heights and i < len(progressive_sequence):
-            # Use progressive height sequence
-            hurdle_height = progressive_sequence[i]
-        else:
-            # Filter available heights based on height_range
-            valid_heights = [
-                h for h in available_heights if height_range[0] <= h <= height_range[1]
-            ]
-            if not valid_heights:
-                valid_heights = available_heights  # fallback to all heights
-            hurdle_height = np.random.choice(valid_heights)
-
-        # Determine URDF file based on height
-        if hurdle_height <= 0.2:
-            urdf_file = "H_hurdel_200.urdf"
-        elif hurdle_height <= 0.3:
-            urdf_file = "H_hurdel_300.urdf"
-        elif hurdle_height <= 0.4:
-            urdf_file = "H_hurdel_400.urdf"
-        else:
-            urdf_file = "H_hurdel_500.urdf"
-
-        # Store hurdle placement info (in meters, world coordinates)
-        hurdle_x = dis_x * terrain.horizontal_scale
-        hurdle_y = (mid_y + rand_y) * terrain.horizontal_scale
-        hurdle_positions.append(
-            (
-                hurdle_x,
-                hurdle_y,
-                0.0,  # Hurdles are placed on the ground, height is determined by URDF
-                hurdle_height,
-                urdf_file,
-            )
-        )
-
-        # Set goal position (in pixels)
-        goals[i + 1] = [dis_x, mid_y + rand_y]
-
-    # Final goal (placed after last hurdle)
-    final_rand_x = (
-        np.random.randint(dis_x_min, dis_x_max) if dis_x_max > dis_x_min else dis_x_min
-    )
-    final_dis_x = dis_x + final_rand_x
-    if final_dis_x > terrain.width:
-        final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
-    goals[num_hurdles + 1] = [final_dis_x, mid_y]
-
-    # Fill remaining goals (if total_goals > num_hurdles + 2) with the final goal position
-    for i in range(num_hurdles + 2, total_goals):
-        goals[i] = [final_dis_x, mid_y]
-
-    # Convert goals to meters
-    terrain.goals = goals * terrain.horizontal_scale
-
-    # Store hurdle placement info in terrain object
-    terrain.hurdle_positions = hurdle_positions
-
-    # Pad edges
-    pad_width = int(pad_width // terrain.horizontal_scale)
-    pad_height = int(pad_height // terrain.vertical_scale)
-    terrain.height_field_raw[:, :pad_width] = pad_height
-    terrain.height_field_raw[:, -pad_width:] = pad_height
-    terrain.height_field_raw[:pad_width, :] = pad_height
-    terrain.height_field_raw[-pad_width:, :] = pad_height
-
-
-def crawl_through_hurdle_terrain(
-    terrain,
-    platform_len=2.5,
-    platform_height=0.0,
-    num_hurdles=4,
-    total_goals=None,
-    x_range=[2.0, 2.5],
-    y_range=[0.0, 0.0],  # 居中对齐，确保阻挡机器人路径
-    height_range=[0.2, 0.5],
-    pad_width=0.1,
-    pad_height=0.5,
-    progressive_heights=True,
-    post_width=0.12,  # 立柱宽度（米）
-    post_depth=0.12,  # 立柱深度（米）
-    passage_width=0.7,  # 两立柱之间的通道宽度（米）
-):
-    """
-    生成"钻过"模式的栏杆地形：两根立柱 + 虚拟横杆高度约束
-
-    机器人需要保持低姿态钻过两根立柱之间，虚拟横杆用于惩罚身体过高。
-    横杆高度递增：200mm → 300mm → 400mm → 500mm
-
-    Parameters:
-        terrain: 地形对象
-        platform_len (float): 起始平台长度 [米]
-        platform_height (float): 起始平台高度 [米]
-        num_hurdles (int): 栏杆数量
-        total_goals (int): 目标点总数
-        x_range (list): 栏杆间距范围 [米]
-        y_range (list): Y轴偏移范围 [米]
-        height_range (list): 虚拟横杆高度范围 [米]
-        pad_width (float): 边缘填充宽度 [米]
-        pad_height (float): 边缘填充高度 [米]
-        progressive_heights (bool): 是否使用递进高度
-        post_width (float): 立柱宽度 [米]
-        post_depth (float): 立柱深度 [米]
-        passage_width (float): 通道宽度 [米]
-    """
-    # 初始化目标点数组
-    if total_goals is None:
-        total_goals = num_hurdles + 2
-    goals = np.zeros((total_goals, 2))
-
-    # 转换单位
-    platform_len_px = int(platform_len / terrain.horizontal_scale)
-    mid_y = terrain.length // 2
-    post_width_px = round(post_width / terrain.horizontal_scale)
-    post_depth_px = round(post_depth / terrain.horizontal_scale)
-    passage_width_px = round(passage_width / terrain.horizontal_scale)
-
-    # 初始化虚拟横杆信息存储
-    if not hasattr(terrain, "virtual_crossbars"):
-        terrain.virtual_crossbars = []
-
-    # 可用高度列表
-    available_heights = [0.2, 0.3, 0.4, 0.5]
-
-    dis_x = platform_len_px
-    goals[0] = [platform_len_px - 1, mid_y]
-
-    for i in range(num_hurdles):
-        # 栏杆间距
-        rand_x = np.random.uniform(x_range[0], x_range[1])
-        rand_x_px = int(rand_x / terrain.horizontal_scale)
-        dis_x += rand_x_px
-
-        # Y轴偏移（中心对齐，确保阻挡）
-        rand_y = np.random.uniform(y_range[0], y_range[1])
-        rand_y_px = int(rand_y / terrain.horizontal_scale)
-
-        # 选择高度
-        if progressive_heights:
-            # 递进高度：按顺序0.2, 0.3, 0.4, 0.5
-            hurdle_height = available_heights[i % len(available_heights)]
-        else:
-            hurdle_height = np.random.uniform(height_range[0], height_range[1])
-
-        hurdle_height_px = round(hurdle_height / terrain.vertical_scale)
-
-        # 计算立柱位置
-        center_y = mid_y + rand_y_px
-        half_passage = passage_width_px // 2
-
-        # 左立柱
-        left_post_y_start = center_y - half_passage - post_width_px
-        left_post_y_end = center_y - half_passage
-
-        # 右立柱
-        right_post_y_start = center_y + half_passage
-        right_post_y_end = center_y + half_passage + post_width_px
-
-        # 立柱X范围
-        post_x_start = max(0, dis_x - post_depth_px // 2)
-        post_x_end = min(terrain.width, dis_x + post_depth_px // 2)
-
-        # 在高度场中生成左右两根立柱
-        if 0 <= left_post_y_start < terrain.length:
-            terrain.height_field_raw[
-                post_x_start:post_x_end,
-                max(0, left_post_y_start) : min(terrain.length, left_post_y_end),
-            ] = hurdle_height_px
-
-        if 0 <= right_post_y_start < terrain.length:
-            terrain.height_field_raw[
-                post_x_start:post_x_end,
-                max(0, right_post_y_start) : min(terrain.length, right_post_y_end),
-            ] = hurdle_height_px
-
-        # 记录虚拟横杆信息（用于奖励计算）
-        crossbar_info = {
-            "x": dis_x * terrain.horizontal_scale,  # 世界坐标
-            "y": center_y * terrain.horizontal_scale,
-            "height": hurdle_height,  # 虚拟横杆高度（米）
-            "width": passage_width,  # 通道宽度（米）
-            "depth": post_depth,  # 检测范围深度（米）
-        }
-        terrain.virtual_crossbars.append(crossbar_info)
-
-        # 设置目标点
-        goals[i + 1] = [dis_x, center_y]
-
-    # 最后一个目标点
-    final_dis_x = dis_x + np.random.randint(
-        int(x_range[0] / terrain.horizontal_scale),
-        int(x_range[1] / terrain.horizontal_scale),
-    )
-    if final_dis_x > terrain.width:
-        final_dis_x = terrain.width - int(0.5 / terrain.horizontal_scale)
-    goals[-1] = [final_dis_x, mid_y]
-
-    # 转换为世界坐标
-    terrain.goals = goals * terrain.horizontal_scale
-
-    # 边缘填充
-    pad_width_px = int(pad_width / terrain.horizontal_scale)
-    pad_height_px = int(pad_height / terrain.vertical_scale)
-    terrain.height_field_raw[:, :pad_width_px] = pad_height_px
-    terrain.height_field_raw[:, -pad_width_px:] = pad_height_px
-    terrain.height_field_raw[:pad_width_px, :] = pad_height_px
-    terrain.height_field_raw[-pad_width_px:, :] = pad_height_px
-
-
-def jump_over_wall_terrain(
-    terrain,
-    platform_len=2.5,
-    platform_height=0.0,
-    num_walls=4,
-    total_goals=None,
-    x_range=[2.0, 2.5],
-    y_range=[-0.3, 0.3],  # 允许一定Y轴偏移
-    height_range=[0.2, 0.5],
-    pad_width=0.1,
-    pad_height=0.5,
-    progressive_heights=True,
-    wall_depth=0.15,  # 墙体厚度（米）
-    wall_width=1.0,  # 墙体宽度（米）
-):
-    """
-    生成"跳跃"模式的墙体地形：实心墙障碍
-
-    机器人需要跳跃越过墙体。墙体高度递增：200mm → 300mm → 400mm → 500mm
-
-    Parameters:
-        terrain: 地形对象
-        platform_len (float): 起始平台长度 [米]
-        platform_height (float): 起始平台高度 [米]
-        num_walls (int): 墙体数量
-        total_goals (int): 目标点总数
-        x_range (list): 墙体间距范围 [米]
-        y_range (list): Y轴偏移范围 [米]
-        height_range (list): 墙体高度范围 [米]
-        pad_width (float): 边缘填充宽度 [米]
-        pad_height (float): 边缘填充高度 [米]
-        progressive_heights (bool): 是否使用递进高度
-        wall_depth (float): 墙体厚度 [米]
-        wall_width (float): 墙体宽度 [米]
-    """
-    # 初始化目标点数组
-    if total_goals is None:
-        total_goals = num_walls + 2
-    goals = np.zeros((total_goals, 2))
-
-    # 转换单位
-    platform_len_px = int(platform_len / terrain.horizontal_scale)
-    mid_y = terrain.length // 2
-    wall_depth_px = max(round(wall_depth / terrain.horizontal_scale), 2)
-    wall_width_px = round(wall_width / terrain.horizontal_scale)
-
-    # 可用高度列表
-    available_heights = [0.2, 0.3, 0.4, 0.5]
-
-    dis_x = platform_len_px
-    goals[0] = [platform_len_px - 1, mid_y]
-
-    for i in range(num_walls):
-        # 墙体间距
-        rand_x = np.random.uniform(x_range[0], x_range[1])
-        rand_x_px = int(rand_x / terrain.horizontal_scale)
-        dis_x += rand_x_px
-
-        # Y轴偏移
-        rand_y = np.random.uniform(y_range[0], y_range[1])
-        rand_y_px = int(rand_y / terrain.horizontal_scale)
-
-        # 选择高度
-        if progressive_heights:
-            # 递进高度：按顺序0.2, 0.3, 0.4, 0.5
-            wall_height = available_heights[i % len(available_heights)]
-        else:
-            wall_height = np.random.uniform(height_range[0], height_range[1])
-
-        wall_height_px = round(wall_height / terrain.vertical_scale)
-
-        # 计算墙体位置
-        center_y = mid_y + rand_y_px
-        half_width = wall_width_px // 2
-
-        wall_y_start = max(0, center_y - half_width)
-        wall_y_end = min(terrain.length, center_y + half_width)
-        wall_x_start = max(0, dis_x - wall_depth_px // 2)
-        wall_x_end = min(terrain.width, dis_x + wall_depth_px // 2)
-
-        # 在高度场中生成实心墙
-        terrain.height_field_raw[wall_x_start:wall_x_end, wall_y_start:wall_y_end] = (
-            wall_height_px
-        )
-
-        # 设置目标点
-        goals[i + 1] = [dis_x, center_y]
-
-    # 最后一个目标点
-    final_dis_x = dis_x + np.random.randint(
-        int(x_range[0] / terrain.horizontal_scale),
-        int(x_range[1] / terrain.horizontal_scale),
-    )
-    if final_dis_x > terrain.width:
-        final_dis_x = terrain.width - int(0.5 / terrain.horizontal_scale)
-    goals[-1] = [final_dis_x, mid_y]
-
-    # 转换为世界坐标
-    terrain.goals = goals * terrain.horizontal_scale
-
-    # 边缘填充
-    pad_width_px = int(pad_width / terrain.horizontal_scale)
-    pad_height_px = int(pad_height / terrain.vertical_scale)
-    terrain.height_field_raw[:, :pad_width_px] = pad_height_px
-    terrain.height_field_raw[:, -pad_width_px:] = pad_height_px
-    terrain.height_field_raw[:pad_width_px, :] = pad_height_px
-    terrain.height_field_raw[-pad_width_px:, :] = pad_height_px
-
-
-def h_hurdle_geometric_terrain(
-    terrain,
-    platform_len=2.5,
-    platform_height=0.0,
-    num_hurdles=4,
-    total_goals=None,
-    x_range=[1.5, 2.5],
-    y_range=[0.0, 0.0],  # 门框居中，不偏移（确保阻挡路径）
-    height_range=[0.2, 0.5],
-    pad_width=0.1,
-    pad_height=0.5,
-    progressive_heights=True,
-    gate_depth=0.10,  # 门框沿前进方向的厚度（增加到10cm，更明显）
-    gate_width=0.8,  # 门框总宽度（增加到80cm，给机器人更多通过空间）
-    post_thickness=0.08,  # 立柱厚度（米）
-):
-    """
-    生成门型栏杆地形（使用几何体actors，真正镂空的门框）
-
-    注意：这个函数只记录门框的位置和参数信息，不在高度场中生成
-    实际的3D门框结构会在 legged_robot.py 的 _create_envs 中使用
-    Isaac Gym的几何体API创建，这样才能实现真正的镂空结构
-
-    门型结构：
-    - 两根立柱在左右两侧
-    - 上方横梁连接两根立柱（悬空，不接触地面）
-    - 中间通道完全镂空，机器人可以通过
-
-    Parameters:
-        terrain: 地形对象
-        platform_len (float): 起始平台长度 [米]
-        platform_height (float): 起始平台高度 [米]
-        num_hurdles (int): 栏杆数量
-        total_goals (int): 目标点总数（保持数组大小一致）
-        x_range (list): 栏杆间距范围 [米]
-        y_range (list): Y轴偏移范围 [米]
-        height_range (list): 栏杆高度范围 [米] - 从[0.2, 0.3, 0.4, 0.5]中选择
-        pad_width (float): 边缘填充宽度 [米]
-        pad_height (float): 边缘填充高度 [米]
-        progressive_heights (bool): 是否使用递进高度（0.2, 0.3, 0.4, 0.5）
-        gate_depth (float): 门框沿前进方向的厚度 [米]
-        gate_width (float): 门框总宽度（立柱外侧到外侧）[米]
-        post_thickness (float): 立柱厚度 [米]
-    """
-    # 初始化目标点数组
-    if total_goals is None:
-        total_goals = num_hurdles + 2
-    goals = np.zeros((total_goals, 2))
-
-    # 保持地形平坦（门框通过几何体actors创建，不在高度场中生成）
-    terrain.height_field_raw[:] = 0
-
-    mid_y = terrain.length // 2  # length实际上是y方向宽度
-
-    # 注意：为了确保每个环境的actor数量一致（Isaac Gym要求）
-    # 我们必须在所有环境中创建相同数量的门框
-
-    # 转换范围到像素单位
-    dis_x_min = round(x_range[0] / terrain.horizontal_scale)
-    dis_x_max = round(x_range[1] / terrain.horizontal_scale)
-    dis_y_min = round(y_range[0] / terrain.horizontal_scale)
-    dis_y_max = round(y_range[1] / terrain.horizontal_scale)
-
-    platform_len_px = round(platform_len / terrain.horizontal_scale)
-    platform_height_int = round(platform_height / terrain.vertical_scale)
-    terrain.height_field_raw[0:platform_len_px, :] = platform_height_int
-
-    dis_x = platform_len_px
-    goals[0] = [platform_len_px - 1, mid_y]
-
-    # 可用的栏杆高度（匹配URDF文件）
-    available_heights = [0.2, 0.3, 0.4, 0.5]
-    if progressive_heights:
-        progressive_sequence = [0.2, 0.3, 0.4, 0.5]
-    else:
-        progressive_sequence = None
-
-    # 初始化门框位置信息列表（用于在legged_robot.py中创建几何体actors）
-    gate_obstacles = []
-
-    for i in range(num_hurdles):
-        # 计算下一个栏杆位置
-        rand_x = (
-            np.random.randint(dis_x_min, dis_x_max)
-            if dis_x_max > dis_x_min
-            else dis_x_min
-        )
-        dis_x += rand_x
-        rand_y = np.random.randint(dis_y_min, dis_y_max) if dis_y_max > dis_y_min else 0
-
-        # 选择栏杆高度
-        if progressive_heights and i < len(progressive_sequence):
-            hurdle_height = progressive_sequence[i]
-        else:
-            valid_heights = [
-                h for h in available_heights if height_range[0] <= h <= height_range[1]
-            ]
-            if not valid_heights:
-                valid_heights = available_heights
-            hurdle_height = np.random.choice(valid_heights)
-
-        # 计算门框在世界坐标系中的位置（米）
-        gate_x = dis_x * terrain.horizontal_scale
-        gate_y = (mid_y + rand_y) * terrain.horizontal_scale
-        gate_z = 0.0  # 地面高度
-
-        # 存储门框信息（将在legged_robot.py中使用这些信息创建几何体actors）
-        gate_info = {
-            "x": gate_x,
-            "y": gate_y,
-            "z": gate_z,
-            "height": hurdle_height,
-            "gate_width": gate_width,
-            "gate_depth": gate_depth,
-            "post_thickness": post_thickness,
-        }
-        gate_obstacles.append(gate_info)
-
-        # 设置目标点（在门框中心）
-        goals[i + 1] = [dis_x, mid_y + rand_y]
-
-    # 最后一个目标点（放在最后一个栏杆之后）
-    final_rand_x = (
-        np.random.randint(dis_x_min, dis_x_max) if dis_x_max > dis_x_min else dis_x_min
-    )
-    final_dis_x = dis_x + final_rand_x
-    if final_dis_x > terrain.width:
-        final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
-    goals[num_hurdles + 1] = [final_dis_x, mid_y]
-
-    # 填充剩余目标点
-    for i in range(num_hurdles + 2, total_goals):
-        goals[i] = [final_dis_x, mid_y]
-
-    # 转换目标点到米
-    terrain.goals = goals * terrain.horizontal_scale
-
-    # 存储门框障碍物信息（供legged_robot.py使用）
-    terrain.gate_obstacles = gate_obstacles
-
-    # 边缘填充
-    pad_width_px = int(pad_width // terrain.horizontal_scale)
-    pad_height_px = int(pad_height // terrain.vertical_scale)
-    terrain.height_field_raw[:, :pad_width_px] = pad_height_px
-    terrain.height_field_raw[:, -pad_width_px:] = pad_height_px
-    terrain.height_field_raw[:pad_width_px, :] = pad_height_px
-    terrain.height_field_raw[-pad_width_px:, :] = pad_height_px
-
-
-def h_hurdle_procedural_terrain(
-    terrain,
-    platform_len=2.5,
-    platform_height=0.0,
-    num_hurdles=4,
-    total_goals=None,
-    x_range=[1.5, 2.5],
     y_range=[0.0, 0.0],
     height_range=[0.2, 0.5],
     pad_width=0.1,
     pad_height=0.5,
     progressive_heights=True,
+    post_spacing=0.6,
+    crossbar_inset=0.05,
 ):
-    """
-    生成完整的H型栏杆地形（程序化创建复合对象，类似URDF结构）
 
-    这个函数创建类似于URDF文件中描述的H型栏杆：
-    1. 顶部横杆（水平圆柱，长0.7m，半径0.008m）
-    2. 两根立柱（垂直圆柱，根据高度调整长度，半径0.008m）
-    3. 两个底座（长方体，0.35×0.03×0.03m）
-    4. 底部连接杆（水平圆柱，长0.6m，半径0.005m）
-
-    在Isaac Gym中，这些组件将作为单个复合对象（composite object）创建，
-    而不是使用URDF文件，从而提高效率。
-
-    Parameters:
-        terrain: 地形对象
-        platform_len (float): 起始平台长度 [米]
-        platform_height (float): 起始平台高度 [米]
-        num_hurdles (int): 栏杆数量
-        total_goals (int): 目标点总数
-        x_range (list): 栏杆间距范围 [米]
-        y_range (list): Y轴偏移范围 [米]
-        height_range (list): 栏杆高度范围 [米]
-        pad_width (float): 边缘填充宽度 [米]
-        pad_height (float): 边缘填充高度 [米]
-        progressive_heights (bool): 是否使用递进高度（0.2, 0.3, 0.4, 0.5）
-    """
-    # 初始化目标点数组
+    # 初始化目标点数组（保持数组大小一致，用于Isaac Gym环境）
     if total_goals is None:
         total_goals = num_hurdles + 2
     goals = np.zeros((total_goals, 2))
 
-    # 保持地形平坦
+    # 保持地形平坦（障碍物通过几何体创建，不修改高度场）
     terrain.height_field_raw[:] = 0
 
-    mid_y = terrain.length // 2
+    mid_y = terrain.length // 2  # 地形中心线（Y轴）
 
-    # 转换范围到像素单位
+    # 转换参数到像素单位
     dis_x_min = round(x_range[0] / terrain.horizontal_scale)
     dis_x_max = round(x_range[1] / terrain.horizontal_scale)
     dis_y_min = round(y_range[0] / terrain.horizontal_scale)
@@ -1587,100 +794,101 @@ def h_hurdle_procedural_terrain(
     platform_height_int = round(platform_height / terrain.vertical_scale)
     terrain.height_field_raw[0:platform_len_px, :] = platform_height_int
 
+    # 起点位置和第一个目标点
     dis_x = platform_len_px
     goals[0] = [platform_len_px - 1, mid_y]
 
-    # 可用的栏杆高度
+    # 可用的栏杆高度（标准高度）
     available_heights = [0.2, 0.3, 0.4, 0.5]
     if progressive_heights:
-        progressive_sequence = [0.2, 0.3, 0.4, 0.5]
+        progressive_sequence = [0.2, 0.3, 0.4, 0.5]  # 递进高度序列
     else:
         progressive_sequence = None
 
-    # 初始化H型栏杆位置信息列表
+    # 初始化H型栏杆位置信息列表（将在legged_robot.py中创建实际几何体）
     h_hurdles = []
 
-    # H型栏杆的组件尺寸（基于URDF文件）
-    top_bar_radius = 0.008  # 顶部横杆半径
-    top_bar_length = 0.7  # 顶部横杆长度
-    leg_radius = 0.008  # 立柱半径
-    foot_box_size = [0.35, 0.03, 0.03]  # 底座尺寸 [长, 宽, 高]
-    foot_connector_radius = 0.005  # 底部连接杆半径
-    foot_connector_length = 0.6  # 底部连接杆长度
+    # 几何体组件尺寸定义
+    post_radius = 0.05  # 立柱半径 [米]
+    crossbar_radius = 0.03  # 横梁半径 [米]
+    crossbar_length = post_spacing - 2 * crossbar_inset  # 横梁长度（扣除两端的缩进）
 
     for i in range(num_hurdles):
-        # 计算下一个栏杆位置
+        # 计算下一个栏杆的X坐标位置
         rand_x = (
             np.random.randint(dis_x_min, dis_x_max)
             if dis_x_max > dis_x_min
             else dis_x_min
         )
         dis_x += rand_x
+
+        # 计算栏杆的Y轴偏移
         rand_y = np.random.randint(dis_y_min, dis_y_max) if dis_y_max > dis_y_min else 0
 
-        # 选择栏杆高度
+        # 选择当前栏杆的高度
         if progressive_heights and i < len(progressive_sequence):
             hurdle_height = progressive_sequence[i]
         else:
+            # 根据height_range筛选有效高度
             valid_heights = [
                 h for h in available_heights if height_range[0] <= h <= height_range[1]
             ]
             if not valid_heights:
-                valid_heights = available_heights
+                valid_heights = available_heights  # 回退到所有可用高度
             hurdle_height = np.random.choice(valid_heights)
 
-        # 根据不同高度计算立柱长度（基于URDF文件的结构）
-        # H_hurdel_200: 立柱长0.2m, H_hurdel_300: 0.3m, H_hurdel_400: 0.4m, H_hurdel_500: 未指定
-        if hurdle_height <= 0.2:
-            leg_length = 0.2
-        elif hurdle_height <= 0.3:
-            leg_length = 0.3
-        elif hurdle_height <= 0.4:
-            leg_length = 0.4
-        else:
-            leg_length = 0.5  # 假设50cm高度对应0.5m立柱
-
-        # 计算栏杆在世界坐标系中的位置（米）
+        # 计算栏杆在世界坐标系中的中心位置
         hurdle_x = dis_x * terrain.horizontal_scale
         hurdle_y = (mid_y + rand_y) * terrain.horizontal_scale
         hurdle_z = 0.0  # 地面高度
 
-        # 存储H型栏杆信息
-        # 每个H型栏杆由多个几何体组成，在legged_robot.py中会被创建为一个复合对象
+        # 计算立柱位置（沿Y轴分布）
+        left_post_y = hurdle_y - post_spacing / 2  # 左侧立柱
+        right_post_y = hurdle_y + post_spacing / 2  # 右侧立柱
+
+        # 底部横杆参数
+        bottom_bar_height = 0.01  # 底部横杆高度（10cm，用来绊倒机器人）
+        bottom_bar_offset_x = 0.0  # 底部横杆在X轴前移8cm（避免与立柱连接成墙）
+        bottom_bar_radius = 0.01  # 底部横杆半径（2cm）
+
+        # 存储H型栏杆的完整几何信息
         hurdle_info = {
             "x": hurdle_x,
             "y": hurdle_y,
             "z": hurdle_z,
-            "height": hurdle_height,
-            "leg_length": leg_length,
-            # 组件尺寸
-            "top_bar": {
-                "radius": top_bar_radius,
-                "length": top_bar_length,
-                "color": [1.0, 1.0, 1.0],  # 白色
+            "height": hurdle_height,  # 栏杆总高度
+            "post_spacing": post_spacing,  # 立柱间距
+            # 立柱信息（两根垂直圆柱）
+            "posts": {
+                "radius": post_radius,
+                "height": hurdle_height,  # 立柱高度等于栏杆高度
+                "left_y": left_post_y,  # 左侧立柱的Y坐标
+                "right_y": right_post_y,  # 右侧立柱的Y坐标
+                "color": [0.3, 0.3, 0.3],  # 深灰色
             },
-            "legs": {
-                "radius": leg_radius,
-                "length": leg_length,
-                "spacing": 0.6,  # 两条立柱之间的间距（Y轴）
-                "color": [0.2, 0.2, 0.8],  # 蓝色
+            # 顶部横梁信息（悬空的水平圆柱，与立柱顶端平齐）
+            "crossbar": {
+                "radius": crossbar_radius,
+                "length": crossbar_length,  # 横梁长度（小于立柱间距）
+                "height": hurdle_height,  # 横梁Z坐标（与立柱顶端平齐）
+                "inset": crossbar_inset,  # 横梁向内缩进距离
+                "color": [0.8, 0.2, 0.2],  # 红色
             },
-            "feet": {
-                "box_size": foot_box_size,
-                "color": [0.5, 0.5, 0.5],  # 灰色
-            },
-            "foot_connector": {
-                "radius": foot_connector_radius,
-                "length": foot_connector_length,
-                "color": [0.8, 0.1, 0.1],  # 红色
+            # 底部横杆信息（用来绊倒机器人，稍微前移避免与立柱连接）
+            "bottom_bar": {
+                "radius": bottom_bar_radius,
+                "length": crossbar_length,  # 与顶部横梁长度相同
+                "height": bottom_bar_height,  # 距离地面10cm
+                "offset_x": bottom_bar_offset_x,  # 在X轴前移8cm
+                "color": [0.2, 0.8, 0.2],  # 绿色
             },
         }
         h_hurdles.append(hurdle_info)
 
-        # 设置目标点（在栏杆中心）
+        # 设置目标点（在栏杆中心，引导机器人穿过）
         goals[i + 1] = [dis_x, mid_y + rand_y]
 
-    # 最后一个目标点
+    # 最终目标点（放在最后一个栏杆之后）
     final_rand_x = (
         np.random.randint(dis_x_min, dis_x_max) if dis_x_max > dis_x_min else dis_x_min
     )
@@ -1689,17 +897,17 @@ def h_hurdle_procedural_terrain(
         final_dis_x = terrain.width - 0.5 // terrain.horizontal_scale
     goals[num_hurdles + 1] = [final_dis_x, mid_y]
 
-    # 填充剩余目标点
+    # 填充剩余目标点（如果total_goals > num_hurdles + 2）
     for i in range(num_hurdles + 2, total_goals):
         goals[i] = [final_dis_x, mid_y]
 
-    # 转换目标点到米
+    # 转换目标点坐标到米制
     terrain.goals = goals * terrain.horizontal_scale
 
-    # 存储H型栏杆信息（供legged_robot.py使用）
+    # 将H型栏杆信息存储到terrain对象（供legged_robot.py使用）
     terrain.h_hurdles = h_hurdles
 
-    # 边缘填充
+    # 地形边缘填充（防止机器人掉出边界）
     pad_width_px = int(pad_width // terrain.horizontal_scale)
     pad_height_px = int(pad_height // terrain.vertical_scale)
     terrain.height_field_raw[:, :pad_width_px] = pad_height_px

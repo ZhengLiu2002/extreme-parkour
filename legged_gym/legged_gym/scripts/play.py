@@ -68,11 +68,11 @@ def play(args):
     # override some parameters for testing
     if args.nodelay:
         env_cfg.domain_rand.action_delay_view = 0
-    env_cfg.env.num_envs = 16 if not args.save else 64
+    env_cfg.env.num_envs = 1 if not args.save else 64
     env_cfg.env.episode_length_s = 60
     env_cfg.commands.resampling_time = 60
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_rows = 1
+    env_cfg.terrain.num_cols = 1
     env_cfg.terrain.height = [0.02, 0.02]
     env_cfg.terrain.terrain_dict = {
         "smooth slope": 0.0,
@@ -95,10 +95,7 @@ def play(args):
         "parkour_step": 0.0,
         "parkour_gap": 0.0,
         "demo": 0.0,
-        "h_hurdle_urdf": 0.0,  # URDF栏杆地形（需要加载URDF文件，显存占用高）
-        "h_hurdle_geometric": 0.0,  # 几何栏杆地形（使用高度场，显存友好）
-        "crawl_through": 0.5,  # 钻过模式：两根立柱+虚拟横杆高度约束
-        "jump_over": 0.5,  # 跳跃模式：实心墙障碍
+        "h_hurdle": 1.0,
     }
 
     env_cfg.terrain.terrain_proportions = list(env_cfg.terrain.terrain_dict.values())

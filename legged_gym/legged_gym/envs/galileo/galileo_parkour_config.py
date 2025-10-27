@@ -9,20 +9,20 @@ class GalileoParkourCfg(LeggedRobotCfg):
         num_envs = 1024  # 训练环境数量
 
     class terrain(LeggedRobotCfg.terrain):
-        num_rows = 10  # 难度等级数量
-        num_cols = 4  # 地形类型数量
+        num_rows = 10  # 难度等级数量（200mm→500mm递进）
+        num_cols = 4  # 只有1种地形类型（h_hurdle）
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.42]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.35]  # x,y,z [m] - 降低初始高度，与base_height_normal一致
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             "FL_hip_joint": 0.1,  # [rad]
             "RL_hip_joint": 0.1,  # [rad]
             "FR_hip_joint": -0.1,  # [rad]
             "RR_hip_joint": -0.1,  # [rad]
             "FL_thigh_joint": 0.8,  # [rad]
-            "RL_thigh_joint": 1.0,  # [rad]
+            "RL_thigh_joint": 0.8,  # [rad]
             "FR_thigh_joint": 0.8,  # [rad]
-            "RR_thigh_joint": 1.0,  # [rad]
+            "RR_thigh_joint": 0.8,  # [rad]
             "FL_calf_joint": -1.5,  # [rad]
             "RL_calf_joint": -1.5,  # [rad]
             "FR_calf_joint": -1.5,  # [rad]
@@ -32,9 +32,9 @@ class GalileoParkourCfg(LeggedRobotCfg):
     class control(LeggedRobotCfg.control):
         control_type = "P"  # PD控制器类型
         # 增强关节刚度以提高稳定性
-        stiffness = {"joint": 40.0}  # [N*m/rad]
-        damping = {"joint": 1.0}  # [N*m*s/rad]
-        action_scale = 0.25  # 动作缩放系数 - 从0.25减小到0.2，减少动作幅度
+        stiffness = {"joint": 50.0}  # [N*m/rad] - 提高刚度，增强稳定性
+        damping = {"joint": 1.5}  # [N*m*s/rad] - 提高阻尼，减少震荡
+        action_scale = 0.25  # 动作缩放系数
         decimation = 4  # 控制频率降采样
 
     class asset(LeggedRobotCfg.asset):
@@ -47,60 +47,53 @@ class GalileoParkourCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         class scales:
-            # tracking rewards
-            tracking_goal_vel = 1.5
-            tracking_yaw = 0.5
-            # regularization rewards
-            lin_vel_z = -1.0
-            ang_vel_xy = -0.05
-            orientation = -1.0
-            dof_acc = -2.5e-7
-            collision = -10.0
-            action_rate = -0.1
-            delta_torques = -1.0e-7
-            torques = -0.00001
-            hip_pos = -0.5
-            dof_error = -0.04
-            feet_stumble = -1
-            feet_edge = -1
+            # ============ 核心任务奖励 ============
+            tracking_goal_vel = 1.5  # 跟踪目标速度
+            tracking_yaw = 0.5  # 跟踪偏航角
 
-            # ============ 栏杆越障相关奖励 ============
-            # 钻过模式（crawl_through）奖励
-            virtual_crossbar_penalty = -8.0  # 惩罚机器人身体高度超过虚拟横杆
-            low_posture_reward = 2.0  # 奖励在通道区域保持低姿态
-            body_obstacle_contact = -10.0  # 惩罚机器人身体与立柱接触（模拟碰倒栏杆）
+            # ============ 高度和姿态稳定（关键！）============
+            base_height = 3.0  # 【新增】强力约束高度跟踪（替代base_height_stability和low_posture_reward）
+            no_fly = -4.0  # 【新增】强力惩罚z轴速度，防止抖动
+            orientation = -1.5  # 惩罚姿态翻滚（保留，因为与ang_vel_xy互补）
+            ang_vel_xy = -0.05  # 轻微惩罚角速度（保留，用于阻尼）
 
-            # 跳跃模式（jump_over）奖励
-            jump_clearance_reward = 2.0  # 奖励跳跃时脚部与墙体保持足够距离
-            leg_wall_contact = -8.0  # 惩罚腿部与墙体接触（模拟碰倒栏杆）
-            jump_height_reward = 1.0  # 奖励跳跃高度（接近墙体时）
+            # ============ 动作平滑性（简化）============
+            action_rate = -0.15  # 惩罚动作变化率（提高权重，增强平滑性）
+            dof_acc = -2.5e-7  # 惩罚关节加速度
+            dof_error = -0.05  # 惩罚关节偏离默认姿态（略微提高）
 
-            # 策略选择奖励（根据障碍物高度引导）
-            strategy_efficiency = 1.5  # 奖励选择高效策略（低栏杆钻，高栏杆跳/钻）
-            obstacle_approach_speed = 0.5  # 奖励接近障碍物时的合理速度
-
-            # 安全奖励
-            smooth_landing = 1.0  # 奖励平稳着地（跳跃后）
-            stable_crawl = 1.0  # 奖励稳定钻行（钻过时）
-
-            # ============ 稳定性奖励 ============
-            feet_air_time = 0.5  # 奖励适当的腾空时间（步态质量）
-            base_height_stability = 0.3  # 奖励维持合理的基座高度
-            stand_still = -0.5  # 惩罚静止不动（鼓励前进）
+            # ============ 碰撞和接触 ============
+            collision = -10.0  # 惩罚非足部碰撞
+            body_obstacle_contact = -10.0  # 惩罚机器人身体与立柱接触
+            feet_stumble = -1.0  # 惩罚脚碰到垂直面
+            feet_edge = -1.0  # 惩罚脚碰到边缘
             feet_contact_forces = -0.01  # 轻微惩罚过大的脚部接触力
-            alive_bonus = 0.5  # 存活奖励（每步小奖励）
+
+            # ============ 钻过栏杆相关 ============
+            virtual_crossbar_penalty = -8.0  # 惩罚机器人身体高度超过虚拟横杆
+            strategy_efficiency = 1.5  # 奖励根据栏杆高度选择合适姿态
+            obstacle_approach_speed = 0.5  # 奖励接近障碍物时的合理速度
+            stable_crawl = 1.0  # 奖励稳定钻行
+
+            # ============ 其他 ============
+            stand_still = -0.5  # 惩罚静止不动
+            alive_bonus = 0.5  # 存活奖励
 
         soft_dof_pos_limit = 0.9  # 关节位置软限制
-        base_height_target = 0.32  # 目标基座高度（平地行走）[m]
-        base_height_crawl_target = 0.25  # 目标基座高度（钻过时）[m]
-        base_height_jump_target = 0.45  # 目标基座高度（准备跳跃时）[m]
+        base_height_target = 0.25  # 钻过栏杆时的目标低姿态 [m]
+        base_height_normal = 0.35  # 平地正常站立高度 [m] - 新增，提高稳定性
 
-        # 栏杆越障相关参数
+        # 钻过栏杆相关参数
         obstacle_contact_force_threshold = 5.0  # 接触力阈值 [N]
-        jump_clearance_threshold = 0.15  # 跳跃间隙阈值 [m]
-        low_hurdle_threshold = 0.30  # 低栏杆高度阈值 [m]（<=30cm优先钻）
-        high_hurdle_threshold = 0.40  # 高栏杆高度阈值 [m]（>=40cm优先钻）
-        obstacle_detection_range = 0.8  # 障碍物检测范围 [m]
+        low_hurdle_threshold = 0.30  # 低栏杆高度阈值 [m]（<=30cm保持更低姿态）
+        high_hurdle_threshold = 0.40  # 高栏杆高度阈值 [m]（>=40cm需要最低姿态）
+        obstacle_detection_range = 1.0  # 障碍物检测范围 [m]
+
+        # 接触力惩罚相关参数
+        post_contact_proximity_threshold = 0.5  # 柱子附近检测范围 [m]
+        contact_force_penalty_scaling = 50.0  # 接触力惩罚缩放因子 [N]
+        max_contact_force_penalty = 2.0  # 最大接触力惩罚倍数
+        enable_contact_force_logging = True  # 是否启用接触力日志输出
 
     class commands(LeggedRobotCfg.commands):
         curriculum = False  # 速度指令课程学习
@@ -139,35 +132,11 @@ class GalileoParkourCfg(LeggedRobotCfg):
 
     class terrain(LeggedRobotCfg.terrain):
         terrain_dict = {
-            "smooth slope": 0.0,
-            "rough slope up": 0.0,
-            "rough slope down": 0.0,
-            "rough stairs up": 0.0,
-            "rough stairs down": 0.0,
-            "discrete": 0.0,
-            "stepping stones": 0.0,
-            "gaps": 0.0,
-            "smooth flat": 0,
-            "pit": 0.0,
-            "wall": 0.0,
-            "platform": 0.0,
-            "large stairs up": 0.0,
-            "large stairs down": 0.0,
-            "parkour": 0.0,
-            "parkour_hurdle": 0.0,
-            "parkour_flat": 0.0,
-            "parkour_step": 0.0,
-            "parkour_gap": 0.0,
-            "demo": 0.0,
-            "h_hurdle_urdf": 0.0,  # URDF栏杆地形（需要加载URDF文件，显存占用高）
-            "h_hurdle_geometric": 0.0,  # 几何栏杆地形（使用高度场，显存友好）
-            "crawl_through": 0.5,  # 钻过模式：两根立柱+虚拟横杆高度约束
-            "jump_over": 0.5,  # 跳跃模式：实心墙障碍
+            "h_hurdle": 1.0,  # H型栏杆：两根立柱+悬空横梁（高度200mm-500mm递进）
         }
         terrain_proportions = list(terrain_dict.values())
         num_goals = 8  # 目标点数量（起点+4个栏杆+终点+额外2个）
-        curriculum = True  # 启用课程学习
-        # load_urdf_obstacles = False
+        curriculum = True  # 启用课程学习（逐渐增加栏杆高度）
 
     class curriculum:
         """课程学习配置：逐步增加难度"""
