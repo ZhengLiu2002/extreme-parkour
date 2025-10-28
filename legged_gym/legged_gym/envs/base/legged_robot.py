@@ -883,7 +883,10 @@ class LeggedRobot(BaseTask):
         )
         self.dof_vel[env_ids] = 0.0
 
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        # 【关键修复】使用正确的Actor索引 (0, 17, 34, ...) 而不是 (0, 1, 2, ...)
+        # 这与 _reset_root_states 中的逻辑保持一致
+        # 机器人Actor的索引是 env_id * num_actors (例如: 0, 17, 34, 51...)
+        env_ids_int32 = (env_ids * self.num_actors).to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(self.dof_state),
@@ -1472,6 +1475,16 @@ class LeggedRobot(BaseTask):
             self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False
         )
 
+        # 初始化障碍物资产缓存字典，避免重复创建资产导致显存浪费和"幽灵障碍物"问题
+        self.hurdle_asset_cache = {}
+        # 存储所有静态障碍物的actor句柄，便于后续管理和查询
+        self.static_obstacle_handles = []
+
+        # 【关键修复】先创建virtual_crossbars供奖励函数使用（不创建Actor）
+        if hasattr(self.terrain, "h_hurdles_dict") and self.terrain.h_hurdles_dict:
+            print("Creating virtual crossbars for rewards...")
+            self._create_virtual_crossbars_from_h_hurdles()
+
         print("Creating env...")
         for i in tqdm(range(self.num_envs)):
             # create env instance
@@ -1516,6 +1529,11 @@ class LeggedRobot(BaseTask):
             self.actor_handles.append(anymal_handle)
 
             self.attach_camera(i, env_handle, anymal_handle)
+
+            # 【关键修复】在创建机器人Actor后立即创建障碍物Actors
+            # 确保Actor顺序为: [R0, H0_actors, R1, H1_actors, ...]
+            if hasattr(self.terrain, "h_hurdles_dict") and self.terrain.h_hurdles_dict:
+                self._add_h_hurdle_static_geometry(env_handle, i)
 
             self.mass_params_tensor[i, :] = (
                 torch.from_numpy(mass_params).to(self.device).to(torch.float)
@@ -1584,15 +1602,7 @@ class LeggedRobot(BaseTask):
         for i, name in enumerate(calf_names):
             self.calf_indices[i] = self.dof_names.index(name)
 
-        # 在所有环境创建完成后，添加H型栏杆静态几何体
-        if hasattr(self.terrain, "h_hurdles_dict") and self.terrain.h_hurdles_dict:
-            print("Adding H-shaped hurdles to environments...")
-            # 【关键】先创建virtual_crossbars供奖励函数使用
-            self._create_virtual_crossbars_from_h_hurdles()
-            # 然后添加几何体
-            for i in range(self.num_envs):
-                self._add_h_hurdle_static_geometry(self.envs[i], i)
-            print(f"H-shaped hurdles added to {self.num_envs} environments")
+        # 【修复完成】障碍物Actor已在主循环内创建，此处无需额外代码
 
     def _create_virtual_crossbars_from_h_hurdles(self):
         """
@@ -1791,12 +1801,7 @@ class LeggedRobot(BaseTask):
 
     def _add_h_hurdle_static_geometry(self, env_handle, env_id):
         """
-        【BUG修复版】在指定环境中添加H型栏杆静态几何体
-
-        修复说明：
-        - 旧版使用 (0,0) 模板并计算相对坐标，逻辑复杂且容易出错
-        - 新版直接获取当前环境对应的 (row, col) 的障碍物数据
-        - terrain.py 中已经将所有坐标转换为世界坐标，这里直接使用即可
+        在指定环境中添加H型栏杆静态几何体
         """
         # 步骤1：获取当前env_id对应的 (row, col)
         row = self.terrain_levels[env_id].item()
@@ -1933,31 +1938,39 @@ class LeggedRobot(BaseTask):
 
         pose = gymapi.Transform(pos, quat)
 
-        # 使用add_ground_geometry添加静态几何体（不会增加actor数量）
-        # 注意：这需要在heightfield/trimesh地形上添加
-        # 由于capsule不支持add_ground_geometry，我们需要用多个box来近似圆柱体
-        # 或者使用actor但放在特殊的collision filter group
+        # 使用资产缓存机制
+        # 1. 创建基于几何属性的唯一键
+        key = ("cylinder", float(radius), float(length))
 
-        # 方案：使用actor但确保collision group设置正确，不影响机器人的tensor
-        asset_options = gymapi.AssetOptions()
-        asset_options.fix_base_link = True
-        asset_options.disable_gravity = True
-        asset_options.density = 1000.0
+        # 2. 检查缓存
+        if key not in self.hurdle_asset_cache:
+            # 3. 如果不在缓存中，创建新资产并存储
+            asset_options = gymapi.AssetOptions()
+            asset_options.fix_base_link = True
+            asset_options.disable_gravity = True
+            asset_options.density = 1000.0
 
-        cylinder_asset = self.gym.create_capsule(
-            self.sim, radius, length, asset_options
-        )
+            cylinder_asset = self.gym.create_capsule(
+                self.sim, radius, length, asset_options
+            )
+            self.hurdle_asset_cache[key] = cylinder_asset
+        else:
+            # 4. 如果在缓存中，直接复用
+            cylinder_asset = self.hurdle_asset_cache[key]
 
-        # 创建actor，设置collision_group与机器人一致以启用物理碰撞
+        # 5. 使用缓存的资产创建演员 (Actor)
         actor_handle = self.gym.create_actor(
             env_handle,
-            cylinder_asset,
+            cylinder_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 【修复】使用env_id而不是self.num_envs+1，启用物理碰撞
-            0,  # collision filter
+            env_id,  # 使用env_id启用物理碰撞
+            1,  # collision filter: 启用与机器人的硬碰撞（显存开销=0）
             0,  # segmentation id
         )
+
+        # 存储actor句柄，便于后续管理
+        self.static_obstacle_handles.append(actor_handle)
 
         # 设置颜色
         self.gym.set_rigid_body_color(
@@ -1980,26 +1993,39 @@ class LeggedRobot(BaseTask):
         """
         pose = gymapi.Transform(pos, gymapi.Quat(0, 0, 0, 1))
 
-        # 创建长方体asset
-        asset_options = gymapi.AssetOptions()
-        asset_options.fix_base_link = True
-        asset_options.disable_gravity = True
-        asset_options.density = 1000.0
+        # 使用资产缓存机制
+        # 1. 创建基于几何属性的唯一键
+        key = ("box", float(length_x), float(length_y), float(length_z))
 
-        box_asset = self.gym.create_box(
-            self.sim, length_x, length_y, length_z, asset_options
-        )
+        # 2. 检查缓存
+        if key not in self.hurdle_asset_cache:
+            # 3. 如果不在缓存中，创建新资产并存储
+            asset_options = gymapi.AssetOptions()
+            asset_options.fix_base_link = True
+            asset_options.disable_gravity = True
+            asset_options.density = 1000.0
 
-        # 创建actor，设置collision_group与机器人一致以启用物理碰撞
+            box_asset = self.gym.create_box(
+                self.sim, length_x, length_y, length_z, asset_options
+            )
+            self.hurdle_asset_cache[key] = box_asset
+        else:
+            # 4. 如果在缓存中，直接复用
+            box_asset = self.hurdle_asset_cache[key]
+
+        # 5. 使用缓存的资产创建演员 (Actor)
         actor_handle = self.gym.create_actor(
             env_handle,
-            box_asset,
+            box_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 使用env_id而不是self.num_envs+1，启用物理碰撞
-            0,  # collision filter
+            env_id,  # 使用env_id启用物理碰撞
+            1,  # collision filter: 启用与机器人的硬碰撞（显存开销=0）
             0,  # segmentation id
         )
+
+        # 存储actor句柄，便于后续管理
+        self.static_obstacle_handles.append(actor_handle)
 
         # 设置颜色
         self.gym.set_rigid_body_color(

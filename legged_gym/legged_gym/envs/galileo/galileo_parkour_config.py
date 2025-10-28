@@ -52,8 +52,8 @@ class GalileoParkourCfg(LeggedRobotCfg):
             tracking_yaw = 0.5  # 跟踪偏航角 - 保持正确方向
 
             # ============ 高度和姿态稳定 ============
-            base_height_regional = 0.5  # 【优化】降低权重，避免机器人躺平也能获得高奖励
-            no_fly = -0.5  # 【修改】大幅减弱！只惩罚持续的正向Z速度，允许短暂跳跃
+            base_height_regional = 0.5  # 降低权重，避免机器人躺平也能获得高奖励
+            no_fly = -0.5  # 大幅减弱！只惩罚持续的正向Z速度，允许短暂跳跃
             orientation = -1.5  # 惩罚姿态翻滚（防止摔倒）
             ang_vel_xy = -0.05  # 轻微惩罚角速度（阻尼效果）
 
@@ -64,9 +64,7 @@ class GalileoParkourCfg(LeggedRobotCfg):
 
             # ============ 碰撞和接触（核心约束！）============
             collision = -10.0  # 惩罚非足部碰撞
-            body_obstacle_contact = (
-                -1.0
-            )  # 【提高惩罚】这是核心约束，必须不惜一切代价避免碰撞
+            body_obstacle_contact = -20.0  # 这是核心约束，必须不惜一切代价避免碰撞
             feet_stumble = -1.0  # 惩罚脚碰到垂直面
             feet_edge = -1.0  # 惩罚脚碰到边缘
             feet_contact_forces = -0.01  # 轻微惩罚过大的脚部接触力

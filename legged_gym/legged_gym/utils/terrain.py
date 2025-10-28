@@ -355,6 +355,11 @@ class Terrain:
             grid_origin_y = j * self.env_width
             # env_origin_z 是机器人起始高度，已经在上面计算过了
 
+            # # ！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+            # # ！！！！！！   在这里添加下面这行代码   ！！！！！！
+            # print(f">>> [DEBUG] 正在为环境({i}, {j})执行【深拷贝】修复逻辑。")
+            # # ！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
             for hurdle_info in terrain.h_hurdles:
                 # 【修复】深拷贝所有嵌套字典，避免共享引用
                 hurdle_world = {}
@@ -917,17 +922,10 @@ def h_hurdle_terrain(
             # 使用递进高度序列（旧版逻辑）
             hurdle_height = progressive_sequence[i]
         else:
-            # 【修改】禁用progressive_heights时，从传入的height_range中随机选择
-            # 根据height_range筛选有效高度
-            valid_heights = [
-                h for h in available_heights if height_range[0] <= h <= height_range[1]
-            ]
-            if not valid_heights:
-                # 如果没有匹配的标准高度，直接在height_range范围内随机选择
-                hurdle_height = np.random.uniform(height_range[0], height_range[1])
-            else:
-                # 从有效高度中随机选择
-                hurdle_height = np.random.choice(valid_heights)
+            # 【优化】直接在传入的 height_range [min, max] 之间随机取值
+            # 这确保了无论 height_range 是什么，都能得到一个有效的高度
+            # 并且高度分布更连续（不再局限于 [0.2, 0.3, 0.4, 0.5]）
+            hurdle_height = np.random.uniform(height_range[0], height_range[1])
 
         # 计算栏杆在世界坐标系中的中心位置
         hurdle_x = dis_x * terrain.horizontal_scale
