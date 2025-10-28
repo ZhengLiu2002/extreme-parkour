@@ -213,19 +213,49 @@ class Terrain:
         stone_distance = 0.05 if difficulty == 0 else 0.1
         gap_size = 1.0 * difficulty
         pit_depth = 1.0 * difficulty
+
+        # ========== 【优化版】4阶段课程学习逻辑 ==========
+        # 关键修复：保持 num_hurdles 固定为 4，只改变 height_range
+        # 这样确保所有环境的 actor 数量一致，避免张量视图错误
+        #
+        # difficulty 由 Isaac Gym 的课程学习机制（基于 terrain_levels）传入
+        # terrain_levels 从 0 到 num_rows-1，映射到 difficulty 0.0 到 1.0
+
+        # 【关键】固定栏杆数量，确保 actor 数量一致
+        num_hurdles = 4
+
+        # 根据 difficulty 动态设置栏杆高度范围
+        if difficulty < 0.25:
+            # 阶段1：平地行走 (difficulty: 0.0 - 0.25)
+            # 【优化】使用极低高度（5cm），让机器人学习基本行走
+            # 而不是完全0高度（可能导致穿模问题）
+            height_range = [0.05, 0.08]
+        elif difficulty < 0.5:
+            # 阶段2：学习钻爬 (difficulty: 0.25 - 0.5)
+            # 只生成高栏杆（40-50cm），机器人必须钻过
+            height_range = [0.4, 0.5]
+        elif difficulty < 0.75:
+            # 阶段3：学习跨越 (difficulty: 0.5 - 0.75)
+            # 只生成低栏杆（20-30cm），鼓励机器人跨越
+            height_range = [0.2, 0.3]
+        else:
+            # 阶段4：混合策略 (difficulty: 0.75 - 1.0)
+            # 生成所有高度的栏杆，机器人需要自主选择策略
+            height_range = [0.2, 0.5]
+
         # H型栏杆地形 - 唯一的地形类型
         if choice < self.proportions[0]:
             idx = 0
             # H型栏杆：两根立柱 + 悬空横梁
             h_hurdle_terrain(
                 terrain,
-                num_hurdles=4,  # 4个栏杆递进训练
+                num_hurdles=num_hurdles,  # 根据课程学习阶段动态决定
                 total_goals=self.num_goals,  # 确保目标点数组大小一致
                 x_range=[2.0, 2.5],  # 栏杆间距（米）
                 y_range=[0.0, 0.0],  # 完全居中
-                height_range=[0.2, 0.5],  # 横杆高度范围（200-500mm）
+                height_range=height_range,  # 根据课程学习阶段动态决定
                 pad_height=0,
-                progressive_heights=True,  # 启用递进高度序列（20,30,40,50cm）
+                progressive_heights=False,  # 禁用递进高度，改用动态height_range
                 post_spacing=0.7,  # 两根立柱之间的间距70cm
                 crossbar_inset=0.05,  # 横梁向内缩进5cm
             )
@@ -235,13 +265,13 @@ class Terrain:
             idx = 0
             h_hurdle_terrain(
                 terrain,
-                num_hurdles=4,
+                num_hurdles=num_hurdles,
                 total_goals=self.num_goals,
                 x_range=[2.0, 2.5],
                 y_range=[0.0, 0.0],
-                height_range=[0.2, 0.5],
+                height_range=height_range,
                 pad_height=0,
-                progressive_heights=True,
+                progressive_heights=False,
                 post_spacing=0.7,  # 两根立柱之间的间距70cm
                 crossbar_inset=0.05,  # 横梁向内缩进5cm
             )
@@ -319,11 +349,56 @@ class Terrain:
         if hasattr(terrain, "h_hurdles") and terrain.h_hurdles:
             # Transform hurdle positions to world coordinates
             hurdles_world = []
+
+            # 【修复】获取环境网格的世界坐标偏移
+            grid_origin_x = i * self.env_length
+            grid_origin_y = j * self.env_width
+            # env_origin_z 是机器人起始高度，已经在上面计算过了
+
             for hurdle_info in terrain.h_hurdles:
-                hurdle_world = hurdle_info.copy()
-                hurdle_world["x"] = hurdle_info["x"] + i * self.env_length
-                hurdle_world["y"] = hurdle_info["y"] + j * self.env_width
+                # 【修复】深拷贝所有嵌套字典，避免共享引用
+                hurdle_world = {}
+
+                # 【修复】转换顶层坐标为绝对世界坐标
+                # h_hurdle_terrain 中生成的坐标是相对于网格单元 (i,j) 的局部坐标
+                hurdle_world["x"] = hurdle_info["x"] + grid_origin_x
+                hurdle_world["y"] = hurdle_info["y"] + grid_origin_y
                 hurdle_world["z"] = hurdle_info["z"] + env_origin_z
+
+                # 复制尺寸参数（不需要坐标转换）
+                hurdle_world["height"] = hurdle_info["height"]
+                hurdle_world["post_spacing"] = hurdle_info["post_spacing"]
+
+                # 【修复】深拷贝并转换 posts 子字典的坐标
+                hurdle_world["posts"] = {
+                    "radius": hurdle_info["posts"]["radius"],
+                    "height": hurdle_info["posts"]["height"],
+                    "left_y": hurdle_info["posts"]["left_y"]
+                    + grid_origin_y,  # 转换Y坐标
+                    "right_y": hurdle_info["posts"]["right_y"]
+                    + grid_origin_y,  # 转换Y坐标
+                    "color": hurdle_info["posts"]["color"],
+                }
+
+                # 【修复】深拷贝 crossbar 子字典（横梁不需要额外坐标转换）
+                hurdle_world["crossbar"] = {
+                    "radius": hurdle_info["crossbar"]["radius"],
+                    "length": hurdle_info["crossbar"]["length"],
+                    "height": hurdle_info["crossbar"]["height"],
+                    "inset": hurdle_info["crossbar"]["inset"],
+                    "color": hurdle_info["crossbar"]["color"],
+                }
+
+                # 【修复】深拷贝 bottom_bar 子字典（如果存在）
+                if "bottom_bar" in hurdle_info:
+                    hurdle_world["bottom_bar"] = {
+                        "radius": hurdle_info["bottom_bar"]["radius"],
+                        "length": hurdle_info["bottom_bar"]["length"],
+                        "height": hurdle_info["bottom_bar"]["height"],
+                        "offset_x": hurdle_info["bottom_bar"]["offset_x"],
+                        "color": hurdle_info["bottom_bar"]["color"],
+                    }
+
                 hurdles_world.append(hurdle_world)
             self.h_hurdles_dict[(i, j)] = hurdles_world
 
@@ -779,8 +854,17 @@ def h_hurdle_terrain(
         total_goals = num_hurdles + 2
     goals = np.zeros((total_goals, 2))
 
-    # 保持地形平坦（障碍物通过几何体创建，不修改高度场）
+    # 【改进】添加轻微地面噪声，增加真实性和鲁棒性
+    # 而不是完全平坦的地面
     terrain.height_field_raw[:] = 0
+
+    # 添加小幅度随机噪声（±5mm）提高适应性
+    noise_amplitude = 0.005 / terrain.vertical_scale  # 5mm噪声
+    if noise_amplitude > 0:
+        noise = np.random.uniform(
+            -noise_amplitude, noise_amplitude, terrain.height_field_raw.shape
+        )
+        terrain.height_field_raw += noise.astype(np.int16)
 
     mid_y = terrain.length // 2  # 地形中心线（Y轴）
 
@@ -810,10 +894,11 @@ def h_hurdle_terrain(
 
     # 几何体组件尺寸定义
     post_radius = 0.008  # 立柱半径 [米]
-    post_distance = 0.5  # 横梁距离 [米]
+    # 【修复】立柱间距应该使用传入的post_spacing参数，而不是hardcode
+    # post_distance = 0.5  # 旧版：硬编码，导致与横梁长度不一致
 
     crossbar_radius = 0.005  # 横梁半径 [米]
-    crossbar_length = post_spacing  # 横梁长度（扣除两端的缩进）
+    crossbar_length = post_spacing  # 横梁长度（与立柱间距一致）
 
     for i in range(num_hurdles):
         # 计算下一个栏杆的X坐标位置
@@ -829,15 +914,20 @@ def h_hurdle_terrain(
 
         # 选择当前栏杆的高度
         if progressive_heights and i < len(progressive_sequence):
+            # 使用递进高度序列（旧版逻辑）
             hurdle_height = progressive_sequence[i]
         else:
+            # 【修改】禁用progressive_heights时，从传入的height_range中随机选择
             # 根据height_range筛选有效高度
             valid_heights = [
                 h for h in available_heights if height_range[0] <= h <= height_range[1]
             ]
             if not valid_heights:
-                valid_heights = available_heights  # 回退到所有可用高度
-            hurdle_height = np.random.choice(valid_heights)
+                # 如果没有匹配的标准高度，直接在height_range范围内随机选择
+                hurdle_height = np.random.uniform(height_range[0], height_range[1])
+            else:
+                # 从有效高度中随机选择
+                hurdle_height = np.random.choice(valid_heights)
 
         # 计算栏杆在世界坐标系中的中心位置
         hurdle_x = dis_x * terrain.horizontal_scale
@@ -845,14 +935,16 @@ def h_hurdle_terrain(
         hurdle_z = 0.0  # 地面高度
 
         # 计算立柱位置（沿Y轴分布）
-        left_post_y = hurdle_y - post_distance / 2  # 左侧立柱
-        right_post_y = hurdle_y + post_distance / 2  # 右侧立柱
+        # 【修复】使用post_spacing而不是post_distance，保持与横梁长度一致
+        left_post_y = hurdle_y - post_spacing / 2  # 左侧立柱
+        right_post_y = hurdle_y + post_spacing / 2  # 右侧立柱
 
         # 底部横杆参数
         bottom_bar_height = 0.05  # 底部横杆高度（5cm，用来绊倒机器人）
         bottom_bar_offset_x = 0.0  # 底部横杆在X轴前移0cm（避免与立柱连接成墙）
         bottom_bar_radius = 0.005  # 底部横杆半径（1cm）
-        bottom_bar_length = 0.4  # 底部横杆长度（500mm）
+        # 【修复】底部横杆长度也应该与立柱间距一致，略短一点避免穿模
+        bottom_bar_length = post_spacing - 0.1  # 比立柱间距短10cm
         crossbar_height = hurdle_height + post_radius
 
         # 存储H型栏杆的完整几何信息

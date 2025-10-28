@@ -120,6 +120,9 @@ class LeggedRobot(BaseTask):
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
         self.post_physics_step()
 
+        # 【新增】初始化课程学习管理器
+        self._init_curriculum_manager()
+
     def step(self, actions):
         """Apply actions, simulate, call self.post_physics_step()
 
@@ -413,6 +416,38 @@ class LeggedRobot(BaseTask):
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
 
+        # 【新增】更新重置环境的静态障碍物信息
+        # 当环境重置时，获取该环境对应的 (row, col) 的栏杆信息
+        # 并将其存储到 static_hurdle_info 中，供 compute_observations 使用
+        if len(env_ids) > 0:
+            for env_id in env_ids:
+                # 获取当前环境 (row, col)
+                row = self.terrain_levels[env_id].item()
+                col = self.terrain_types[env_id].item()
+
+                # 获取当前环境 (row, col) 对应的栏杆列表
+                hurdles_world = self.terrain.h_hurdles_dict.get((row, col), [])
+
+                # 构建栏杆数据 [x, y, height]
+                hurdle_data = []
+                for k in range(4):  # 固定4个栏杆
+                    if k < len(hurdles_world):
+                        hurdle_data.append(
+                            [
+                                hurdles_world[k]["x"],
+                                hurdles_world[k]["y"],
+                                hurdles_world[k]["height"],
+                            ]
+                        )
+                    else:
+                        # 如果栏杆少于4个，用0填充（不应该发生，因为我们固定了num_hurdles=4）
+                        hurdle_data.append([0.0, 0.0, 0.0])
+
+                # 更新张量
+                self.static_hurdle_info[env_id] = torch.tensor(
+                    hurdle_data, device=self.device, dtype=torch.float
+                )
+
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -491,12 +526,62 @@ class LeggedRobot(BaseTask):
             ),
             dim=-1,
         )
+        # 【新增】计算障碍物特权观测 (4个栏杆 * [delta_x, delta_y, height] = 12个值)
+        # 这些信息将帮助 Critic 理解环境，从而更好地指导 Actor 的学习
+
+        # 获取机器人当前位置 [N, 2]
+        robot_pos_xy = self.root_states[:, :2]
+
+        # 获取栏杆绝对位置 [N, 4, 2]
+        hurdle_abs_pos_xy = self.static_hurdle_info[:, :, :2]
+
+        # 计算世界坐标系下的相对位置 [N, 4, 2]
+        hurdle_relative_pos_xy_world = hurdle_abs_pos_xy - robot_pos_xy.unsqueeze(1)
+
+        # 【优化】将相对位置转换到机器人局部坐标系
+        # 这样机器人"看到"的障碍物位置与其朝向无关，提高学习效率
+        # 使用base_quat的逆旋转将世界坐标转换为局部坐标
+
+        # 添加z=0维度，使其成为3D向量 [N, 4, 3]
+        hurdle_relative_pos_3d = torch.cat(
+            [
+                hurdle_relative_pos_xy_world,
+                torch.zeros_like(hurdle_relative_pos_xy_world[:, :, :1]),
+            ],
+            dim=-1,
+        )
+
+        # 对每个栏杆应用逆旋转 [N, 4, 3]
+        hurdle_relative_pos_local = torch.stack(
+            [
+                quat_rotate_inverse(self.base_quat, hurdle_relative_pos_3d[:, i, :])
+                for i in range(4)
+            ],
+            dim=1,
+        )
+
+        # 只取xy分量 [N, 4, 2]
+        hurdle_relative_pos_xy_local = hurdle_relative_pos_local[:, :, :2]
+
+        # 获取栏杆高度 [N, 4, 1]
+        hurdle_heights = self.static_hurdle_info[:, :, 2].unsqueeze(-1)
+
+        # 组合成 [N, 4, 3]：局部坐标系下的 [delta_x, delta_y, height]
+        obstacle_priv_obs = torch.cat(
+            [hurdle_relative_pos_xy_local, hurdle_heights], dim=-1
+        )
+
+        # 展平为 [N, 12]
+        obstacle_priv_obs_flat = obstacle_priv_obs.view(self.num_envs, -1)
+
+        # 构建完整的特权潜在观测
         priv_latent = torch.cat(
             (
                 self.mass_params_tensor,
                 self.friction_coeffs_tensor,
                 self.motor_strength[0] - 1,
                 self.motor_strength[1] - 1,
+                obstacle_priv_obs_flat,  # 【关键】添加障碍物信息
             ),
             dim=-1,
         )
@@ -846,13 +931,32 @@ class LeggedRobot(BaseTask):
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
 
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(
-            self.sim,
-            gymtorch.unwrap_tensor(self.root_states),
-            gymtorch.unwrap_tensor(env_ids_int32),
-            len(env_ids_int32),
-        )
+        # 【关键修复】只更新机器人的状态到all_root_states
+        if self.num_actors > 1:
+            # 更新机器人actor的状态
+            self.all_root_states[env_ids, 0, :] = self.root_states[env_ids]
+
+            # 机器人Actor的索引是 [0, num_actors, 2*num_actors, ...]
+            robot_actor_indices = (env_ids * self.num_actors).to(dtype=torch.int32)
+
+            # 使用扁平化的all_root_states作为源张量
+            # Isaac Gym会从中提取robot_actor_indices指定的行来更新模拟器
+            all_states_flat = self.all_root_states.view(-1, 13).contiguous()
+
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(all_states_flat),  # 源数据：所有actors的状态
+                gymtorch.unwrap_tensor(robot_actor_indices),  # 目标索引：只更新机器人
+                len(robot_actor_indices),
+            )
+        else:
+            # 只有机器人actor的情况（无障碍物）
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(self.root_states),
+                gymtorch.unwrap_tensor(env_ids.to(dtype=torch.int32)),
+                len(env_ids),
+            )
 
     def _push_robots(self):
         """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
@@ -861,9 +965,34 @@ class LeggedRobot(BaseTask):
             -max_vel, max_vel, (self.num_envs, 2), device=self.device
         )  # lin vel x/y
 
-        self.gym.set_actor_root_state_tensor(
-            self.sim, gymtorch.unwrap_tensor(self.root_states)
-        )
+        # 【关键修复】只更新机器人Actor的状态
+        if self.num_actors > 1:
+            # 更新 all_root_states 中机器人的状态
+            self.all_root_states[:, 0, :] = self.root_states
+
+            # 获取所有机器人Actor的索引
+            all_robot_indices = torch.arange(
+                0,
+                self.num_envs * self.num_actors,
+                self.num_actors,
+                device=self.device,
+                dtype=torch.int32,
+            )
+
+            # 使用扁平化的all_root_states作为源张量
+            all_states_flat = self.all_root_states.view(-1, 13).contiguous()
+
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(all_states_flat),  # 源数据：所有actors的状态
+                gymtorch.unwrap_tensor(all_robot_indices),  # 目标索引：只更新机器人
+                len(all_robot_indices),
+            )
+        else:
+            # 保持原样 (num_actors == 1)
+            self.gym.set_actor_root_state_tensor(
+                self.sim, gymtorch.unwrap_tensor(self.root_states)
+            )
 
     def _update_terrain_curriculum(self, env_ids):
         """Implements the game-inspired curriculum.
@@ -1117,6 +1246,19 @@ class LeggedRobot(BaseTask):
                 self.cfg.depth.resized[1],
                 self.cfg.depth.resized[0],
             ).to(self.device)
+
+        # 【新增】初始化障碍物信息张量
+        # 用于存储每个环境的4个栏杆的绝对世界坐标和高度 [abs_x, abs_y, height]
+        # shape: (num_envs, 4, 3)
+        # 这个信息将在 reset_idx 中更新，并在 compute_observations 中用于计算相对位置
+        self.static_hurdle_info = torch.zeros(
+            self.num_envs,
+            4,
+            3,
+            device=self.device,
+            dtype=torch.float,
+            requires_grad=False,
+        )
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, whcih will be called to compute the total reward.
@@ -1445,9 +1587,56 @@ class LeggedRobot(BaseTask):
         # 在所有环境创建完成后，添加H型栏杆静态几何体
         if hasattr(self.terrain, "h_hurdles_dict") and self.terrain.h_hurdles_dict:
             print("Adding H-shaped hurdles to environments...")
+            # 【关键】先创建virtual_crossbars供奖励函数使用
+            self._create_virtual_crossbars_from_h_hurdles()
+            # 然后添加几何体
             for i in range(self.num_envs):
                 self._add_h_hurdle_static_geometry(self.envs[i], i)
             print(f"H-shaped hurdles added to {self.num_envs} environments")
+
+    def _create_virtual_crossbars_from_h_hurdles(self):
+        """
+        【关键修复】从h_hurdles_dict创建virtual_crossbars列表供奖励函数使用
+        """
+        # 使用第一个地形块（row=0, col=0）的栏杆作为模板
+        template_hurdles = self.terrain.h_hurdles_dict.get((0, 0), [])
+
+        if not template_hurdles:
+            print("[警告] 未找到H型栏杆信息，virtual_crossbars将为空")
+            self.terrain.virtual_crossbars = []
+            return
+
+        # 【新增】获取 (0, 0) 环境的地形原点
+        template_origin = self.terrain_origins[0, 0]  # [x, y, z]
+        template_origin_x = template_origin[0].item()
+        template_origin_y = template_origin[1].item()
+
+        virtual_crossbars = []
+        for hurdle_info in template_hurdles:
+            # h_hurdles_dict中的坐标是世界坐标
+            world_x = hurdle_info["x"]
+            world_y = hurdle_info["y"]
+
+            # 【修改】使用减法计算相对坐标，而不是模运算
+            relative_x = world_x - template_origin_x
+            relative_y = world_y - template_origin_y
+
+            crossbar_info = {
+                "x": relative_x,
+                "y": relative_y,
+                "z": hurdle_info["z"],
+                "height": hurdle_info["crossbar"]["height"],
+                "width": hurdle_info["post_spacing"],
+                "depth": 0.1,  # 栏杆前后范围
+            }
+            virtual_crossbars.append(crossbar_info)
+
+        self.terrain.virtual_crossbars = virtual_crossbars
+        print(f"[虚拟横杆] 已创建 {len(virtual_crossbars)} 个虚拟横杆用于奖励计算")
+        for i, cb in enumerate(virtual_crossbars):
+            print(
+                f"  横杆{i+1}: x={cb['x']:.2f}m, y={cb['y']:.2f}m, 高度={cb['height']:.2f}m, 宽度={cb['width']:.2f}m"
+            )
 
     def _create_gate_assets(self):
         """创建门框几何体assets（立柱和横梁）"""
@@ -1601,21 +1790,33 @@ class LeggedRobot(BaseTask):
         )
 
     def _add_h_hurdle_static_geometry(self, env_handle, env_id):
-        """在指定环境中添加H型栏杆静态几何体"""
-        # 获取当前环境的地形坐标
+        """
+        【BUG修复版】在指定环境中添加H型栏杆静态几何体
+
+        修复说明：
+        - 旧版使用 (0,0) 模板并计算相对坐标，逻辑复杂且容易出错
+        - 新版直接获取当前环境对应的 (row, col) 的障碍物数据
+        - terrain.py 中已经将所有坐标转换为世界坐标，这里直接使用即可
+        """
+        # 步骤1：获取当前env_id对应的 (row, col)
         row = self.terrain_levels[env_id].item()
         col = self.terrain_types[env_id].item()
 
-        # 获取当前环境的H型栏杆列表
-        h_hurdles = self.terrain.h_hurdles_dict.get((row, col), [])
+        # 步骤2：获取当前 (row, col) 对应的障碍物列表
+        # terrain.py 的 add_terrain_to_map 已将所有坐标转换为世界坐标
+        hurdles_world = self.terrain.h_hurdles_dict.get((row, col), [])
 
-        if not h_hurdles:
+        if not hurdles_world:
             return
 
-        for hurdle_info in h_hurdles:
+        # 步骤3：遍历障碍物并使用它们存储的绝对世界坐标创建actor
+        for hurdle_info in hurdles_world:
+            # 直接从hurdle_info中提取已计算好的世界坐标
             x = hurdle_info["x"]
             y = hurdle_info["y"]
             z = hurdle_info["z"]
+
+            # 提取几何参数
             height = hurdle_info["height"]
             post_spacing = hurdle_info["post_spacing"]
 
@@ -1623,6 +1824,7 @@ class LeggedRobot(BaseTask):
             posts = hurdle_info["posts"]
             post_radius = posts["radius"]
             post_height = posts["height"]
+            # 【修复】立柱的Y坐标也必须使用绝对坐标（已在terrain.py中转换）
             left_post_y = posts["left_y"]
             right_post_y = posts["right_y"]
             post_color = gymapi.Vec3(*posts["color"])
@@ -1634,7 +1836,8 @@ class LeggedRobot(BaseTask):
             crossbar_height = crossbar["height"]
             crossbar_color = gymapi.Vec3(*crossbar["color"])
 
-            # 底部横杆信息（如果有）
+            # 底部横杆信息
+            bottom_bar = None
             if "bottom_bar" in hurdle_info:
                 bottom_bar = hurdle_info["bottom_bar"]
                 bottom_bar_radius = bottom_bar["radius"]
@@ -1642,13 +1845,14 @@ class LeggedRobot(BaseTask):
                 bottom_bar_height = bottom_bar["height"]
                 bottom_bar_offset_x = bottom_bar["offset_x"]
                 bottom_bar_color = gymapi.Vec3(*bottom_bar["color"])
-            else:
-                bottom_bar = None
+
+            # 步骤5：使用正确的绝对世界坐标创建几何体
 
             # 创建左立柱（圆柱体）
             left_post_pos = gymapi.Vec3(x, left_post_y, z + post_height / 2.0)
             self._add_cylinder_geometry(
                 env_handle,
+                env_id,  # 传入env_id
                 left_post_pos,
                 post_radius,
                 post_height,
@@ -1660,6 +1864,7 @@ class LeggedRobot(BaseTask):
             right_post_pos = gymapi.Vec3(x, right_post_y, z + post_height / 2.0)
             self._add_cylinder_geometry(
                 env_handle,
+                env_id,  # 传入env_id
                 right_post_pos,
                 post_radius,
                 post_height,
@@ -1668,12 +1873,11 @@ class LeggedRobot(BaseTask):
             )
 
             # 创建顶部横梁（长方体）
-            # 横梁中心应该在立柱顶端 + 横梁半径的位置
             crossbar_center_z = z + crossbar_height + crossbar_radius
             crossbar_pos = gymapi.Vec3(x, y, crossbar_center_z)
-            # 横梁作为长方体：横梁长度方向为Y轴，高度为2*radius（直径），宽度为2*radius（直径）
             self._add_box_geometry(
                 env_handle,
+                env_id,  # 传入env_id
                 crossbar_pos,
                 crossbar_length,  # Y轴方向（长度）
                 2 * crossbar_radius,  # Z轴方向（高度）
@@ -1681,17 +1885,17 @@ class LeggedRobot(BaseTask):
                 crossbar_color,
             )
 
-            # 创建底部横杆（如果有的话，用来绊倒机器人）
+            # 创建底部横杆
             if bottom_bar is not None:
-                # 底部横杆中心在指定高度 + 半径，使其底部接近地面
                 bottom_bar_center_z = z + bottom_bar_height + bottom_bar_radius
                 bottom_bar_pos = gymapi.Vec3(
-                    x + bottom_bar_offset_x,  # 稍微前移，避免与立柱连接
+                    x + bottom_bar_offset_x,
                     y,
                     bottom_bar_center_z,
                 )
                 self._add_cylinder_geometry(
                     env_handle,
+                    env_id,  # 传入env_id
                     bottom_bar_pos,
                     bottom_bar_radius,
                     bottom_bar_length,
@@ -1700,12 +1904,13 @@ class LeggedRobot(BaseTask):
                 )
 
     def _add_cylinder_geometry(
-        self, env_handle, pos, radius, length, color, vertical=True
+        self, env_handle, env_id, pos, radius, length, color, vertical=True
     ):
         """添加一个圆柱体几何到环境中（作为静态障碍，不创建actor）
 
         Args:
             env_handle: 环境句柄
+            env_id: 环境ID（用于collision_group）
             pos: 圆柱体中心位置
             radius: 圆柱体半径
             length: 圆柱体长度
@@ -1743,14 +1948,13 @@ class LeggedRobot(BaseTask):
             self.sim, radius, length, asset_options
         )
 
-        # 创建actor，使用collision group来隔离
-        # 注意：collision_group设置为self.num_envs可以避免与机器人碰撞计算
+        # 创建actor，设置collision_group与机器人一致以启用物理碰撞
         actor_handle = self.gym.create_actor(
             env_handle,
             cylinder_asset,
             pose,
             "h_hurdle_static",
-            self.num_envs + 1,  # 使用不同的collision group避免干扰
+            env_id,  # 【修复】使用env_id而不是self.num_envs+1，启用物理碰撞
             0,  # collision filter
             0,  # segmentation id
         )
@@ -1760,11 +1964,14 @@ class LeggedRobot(BaseTask):
             env_handle, actor_handle, 0, gymapi.MESH_VISUAL, color
         )
 
-    def _add_box_geometry(self, env_handle, pos, length_y, length_z, length_x, color):
+    def _add_box_geometry(
+        self, env_handle, env_id, pos, length_y, length_z, length_x, color
+    ):
         """添加一个长方体几何到环境中（作为静态障碍）
 
         Args:
             env_handle: 环境句柄
+            env_id: 环境ID（用于collision_group）
             pos: 长方体中心位置
             length_y: Y轴方向长度（横梁的长度方向）
             length_z: Z轴方向长度（高度）
@@ -1783,13 +1990,13 @@ class LeggedRobot(BaseTask):
             self.sim, length_x, length_y, length_z, asset_options
         )
 
-        # 创建actor
+        # 创建actor，设置collision_group与机器人一致以启用物理碰撞
         actor_handle = self.gym.create_actor(
             env_handle,
             box_asset,
             pose,
             "h_hurdle_static",
-            self.num_envs + 1,  # 使用不同的collision group避免干扰
+            env_id,  # 使用env_id而不是self.num_envs+1，启用物理碰撞
             0,  # collision filter
             0,  # segmentation id
         )
@@ -2196,7 +2403,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_lin_vel_z(self):
         rew = torch.square(self.base_lin_vel[:, 2])
-        rew[self.env_class != 17] *= 0.5
+        # rew[self.env_class != 17] *= 0.5
         return rew
 
     def _reward_ang_vel_xy(self):
@@ -2204,7 +2411,6 @@ class LeggedRobot(BaseTask):
 
     def _reward_orientation(self):
         rew = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
-        rew[self.env_class != 17] = 0.0
         return rew
 
     def _reward_dof_acc(self):
@@ -2939,70 +3145,268 @@ class LeggedRobot(BaseTask):
         # 简单地返回全1，表示所有存活的机器人都获得奖励
         return torch.ones(self.num_envs, dtype=torch.float, device=self.device)
 
-    def _reward_base_height(self):
+    def _reward_base_height_regional(self):
         """
-        强力约束基座高度跟踪目标高度
-        这是改进版，解决z轴不稳定问题
+        【核心创新】区域感知的高度奖励
 
-        策略：
-        1. 在障碍物附近：使用低姿态（钻过栏杆）
-        2. 在平地区域：使用自然站立高度（更稳定）
-        3. 使用强惩罚来抑制高度偏离
+        设计理念：
+        - 在平地区域（远离障碍物）：激活高度奖励，鼓励机器人使用base_height_normal高效行走
+        - 在障碍物附近：完全不施加高度奖励/惩罚，将决策权交给机器人自主探索
+
+        这样设计的好处：
+        1. 解决"平地站立"问题：在平地上机器人会学会稳定行走
+        2. 保留策略自由度：在障碍物附近不强制任何高度，机器人可以自由选择跳跃或钻爬
+        3. 主要驱动力来自body_obstacle_contact惩罚：碰到障碍物会受到强惩罚，迫使机器人学习合适策略
         """
+        # 获取当前基座高度
         robot_z = self.root_states[:, 2]
         ground_z = self.env_origins[:, 2]
         current_height = robot_z - ground_z
 
-        # 获取配置的目标高度
-        low_target = getattr(
-            self.cfg.rewards, "base_height_target", 0.25
-        )  # 钻过时的低姿态
-        normal_target = getattr(
-            self.cfg.rewards, "base_height_normal", 0.35
-        )  # 平地正常高度
+        # 平地正常行走高度
+        normal_target = getattr(self.cfg.rewards, "base_height_normal", 0.35)
 
-        # 初始化目标高度为正常高度
-        target_heights = (
-            torch.ones(self.num_envs, dtype=torch.float, device=self.device)
-            * normal_target
+        # 障碍物安全距离（超过此距离才激活高度奖励）
+        safe_distance = getattr(self.cfg.rewards, "obstacle_safe_distance", 1.0)
+
+        # 计算每个环境到最近障碍物的距离
+        min_dist_to_obstacle = (
+            torch.ones(self.num_envs, dtype=torch.float, device=self.device) * 999.0
         )
 
-        # 检测是否在障碍物附近
         if (
             hasattr(self.terrain, "virtual_crossbars")
             and len(self.terrain.virtual_crossbars) > 0
         ):
             robot_pos = self.root_states[:, :3]
+            rel_pos = robot_pos - self.env_origins
 
             for crossbar in self.terrain.virtual_crossbars:
                 crossbar_x = crossbar["x"]
                 crossbar_y = crossbar["y"]
                 crossbar_width = crossbar["width"]
+                crossbar_depth = crossbar["depth"]
 
-                # 向量化计算距离
-                rel_pos = robot_pos - self.env_origins
+                # 计算到横杆中心的距离
                 x_distance = torch.abs(rel_pos[:, 0] - crossbar_x)
                 y_distance = torch.abs(rel_pos[:, 1] - crossbar_y)
 
-                # 在障碍物前后2米、左右通道内使用低姿态
-                near_obstacle = (x_distance < 2.0) & (
-                    y_distance < crossbar_width / 2 + 0.2
+                # 只考虑在通道内的情况（Y方向在栏杆范围内）
+                in_channel = y_distance < (crossbar_width / 2 + 0.3)
+
+                # 计算X方向距离（前后距离）
+                dist_to_crossbar = torch.where(
+                    in_channel, x_distance, torch.tensor(999.0, device=self.device)
                 )
-                target_heights[near_obstacle] = low_target
+
+                # 更新最小距离
+                min_dist_to_obstacle = torch.min(min_dist_to_obstacle, dist_to_crossbar)
+
+        # 计算区域系数：远离障碍物时为1，靠近时平滑降为0
+        # 使用平滑的sigmoid函数进行过渡
+        regional_weight = torch.sigmoid((min_dist_to_obstacle - safe_distance) / 0.3)
 
         # 计算高度误差
-        height_error = torch.abs(current_height - target_heights)
+        height_error = torch.abs(current_height - normal_target)
 
-        # 使用更强的高斯奖励
-        reward = torch.exp(-height_error * 20.0)  # 增强系数从10到20
+        # 使用高斯奖励，只在平地区域生效
+        base_reward = torch.exp(-height_error * 15.0)
+
+        # 应用区域权重
+        reward = base_reward * regional_weight
 
         return reward
 
     def _reward_no_fly(self):
         """
-        强力惩罚z轴方向的速度（上下抖动）
-        这是解决z轴不稳定的关键
+        只惩罚持续的正向Z速度（向上飞），允许短暂跳跃
+
+        设计理念：
+        - 旧版本惩罚所有Z轴速度，导致机器人不敢跳跃
+        - 新版本只惩罚较大的正向Z速度（向上飞），对负向速度（落地）和小幅度跳跃容忍
+        - 这样既防止了过度的"飞行"抖动，又允许必要的跳跃动作
         """
         z_vel = self.base_lin_vel[:, 2]
-        # 使用平方惩罚，速度越大惩罚越重
-        return torch.square(z_vel)
+
+        # 只对正向速度（向上）施加惩罚，且使用阈值
+        # 阈值设为0.5 m/s：小于此速度视为正常，不惩罚
+        threshold = 0.5
+
+        # 计算超出阈值的正向速度
+        excess_upward_vel = torch.clamp(z_vel - threshold, min=0.0)
+
+        # 使用平方惩罚，只惩罚过大的向上速度
+        penalty = torch.square(excess_upward_vel)
+
+        return penalty
+
+    # ========================================================================
+    # 课程学习管理器 (Curriculum Learning Manager)
+    # ========================================================================
+
+    def _init_curriculum_manager(self):
+        """
+        初始化四阶段课程学习管理器
+
+        阶段1：平地行走 (flat_walking)
+        阶段2：学习钻爬 (learn_crawl) - 只有高障碍物
+        阶段3：学习跨越 (learn_jump) - 只有低障碍物
+        阶段4：混合策略 (mixed_strategy) - 全部高度随机
+        """
+        # 检查是否启用课程学习
+        if not hasattr(self.cfg, "curriculum") or not getattr(
+            self.cfg.curriculum, "enabled", False
+        ):
+            self.curriculum_enabled = False
+            print("[课程学习] 未启用课程学习")
+            return
+
+        self.curriculum_enabled = True
+        self.curriculum_stage = 0  # 当前阶段 (0-3)
+        self.curriculum_iteration = 0  # 当前阶段的训练迭代次数
+        self.curriculum_success_buffer = []  # 成功率统计缓冲区
+
+        # 加载阶段配置
+        self.curriculum_stages = [
+            {
+                "name": self.cfg.curriculum.stage1_name,
+                "terrain_types": self.cfg.curriculum.stage1_terrain_types,
+                "obstacle_heights": self.cfg.curriculum.stage1_obstacle_heights,
+                "num_obstacles": self.cfg.curriculum.stage1_num_obstacles,
+                "vel_range": self.cfg.curriculum.stage1_vel_range,
+                "success_threshold": self.cfg.curriculum.stage1_success_threshold,
+                "min_iterations": self.cfg.curriculum.stage1_min_iterations,
+                "obstacle_spacing": [2.5, 3.0],  # 阶段1无障碍，默认值
+            },
+            {
+                "name": self.cfg.curriculum.stage2_name,
+                "terrain_types": self.cfg.curriculum.stage2_terrain_types,
+                "obstacle_heights": self.cfg.curriculum.stage2_obstacle_heights,
+                "num_obstacles": self.cfg.curriculum.stage2_num_obstacles,
+                "vel_range": self.cfg.curriculum.stage2_vel_range,
+                "success_threshold": self.cfg.curriculum.stage2_success_threshold,
+                "min_iterations": self.cfg.curriculum.stage2_min_iterations,
+                "obstacle_spacing": self.cfg.curriculum.stage2_obstacle_spacing,
+            },
+            {
+                "name": self.cfg.curriculum.stage3_name,
+                "terrain_types": self.cfg.curriculum.stage3_terrain_types,
+                "obstacle_heights": self.cfg.curriculum.stage3_obstacle_heights,
+                "num_obstacles": self.cfg.curriculum.stage3_num_obstacles,
+                "vel_range": self.cfg.curriculum.stage3_vel_range,
+                "success_threshold": self.cfg.curriculum.stage3_success_threshold,
+                "min_iterations": self.cfg.curriculum.stage3_min_iterations,
+                "obstacle_spacing": self.cfg.curriculum.stage3_obstacle_spacing,
+            },
+            {
+                "name": self.cfg.curriculum.stage4_name,
+                "terrain_types": self.cfg.curriculum.stage4_terrain_types,
+                "obstacle_heights": self.cfg.curriculum.stage4_obstacle_heights,
+                "num_obstacles": self.cfg.curriculum.stage4_num_obstacles,
+                "vel_range": self.cfg.curriculum.stage4_vel_range,
+                "success_threshold": self.cfg.curriculum.stage4_success_threshold,
+                "min_iterations": self.cfg.curriculum.stage4_min_iterations,
+                "obstacle_spacing": self.cfg.curriculum.stage4_obstacle_spacing,
+            },
+        ]
+
+        # 应用第一阶段配置
+        self._apply_curriculum_stage(0)
+
+        print(f"[课程学习] 已启用，共{len(self.curriculum_stages)}个阶段")
+        print(f"[课程学习] 当前阶段: 阶段1 - {self.curriculum_stages[0]['name']}")
+
+    def _apply_curriculum_stage(self, stage_idx):
+        """应用指定阶段的课程配置"""
+        if stage_idx >= len(self.curriculum_stages):
+            print(f"[课程学习] 已完成所有阶段！")
+            return
+
+        stage = self.curriculum_stages[stage_idx]
+        self.curriculum_stage = stage_idx
+        self.curriculum_iteration = 0
+
+        # 更新速度指令范围
+        self.command_ranges["lin_vel_x"] = stage["vel_range"]
+
+        print(f"\n{'='*80}")
+        print(f"[课程学习] 切换到阶段{stage_idx + 1}: {stage['name']}")
+        print(f"  - 地形类型: {stage['terrain_types']}")
+        print(f"  - 障碍物高度: {stage['obstacle_heights']}")
+        print(f"  - 障碍物数量: {stage['num_obstacles']}")
+        print(f"  - 速度范围: {stage['vel_range']} m/s")
+        print(f"  - 成功率阈值: {stage['success_threshold']}")
+        print(f"  - 最少训练迭代: {stage['min_iterations']}")
+        print(f"{'='*80}\n")
+
+    def _update_curriculum_stage(self):
+        """
+        在训练迭代中调用，检查是否应该进入下一阶段
+
+        进阶条件：
+        1. 达到最少训练迭代次数
+        2. 最近N次评估的平均成功率超过阈值
+        """
+        if not self.curriculum_enabled:
+            return
+
+        # 检查是否已是最后阶段
+        if self.curriculum_stage >= len(self.curriculum_stages) - 1:
+            return
+
+        self.curriculum_iteration += 1
+        stage = self.curriculum_stages[self.curriculum_stage]
+
+        # 计算当前成功率（基于机器人前进距离）
+        dis_to_origin = torch.norm(
+            self.root_states[:, :2] - self.env_origins[:, :2], dim=1
+        )
+        threshold_distance = self.commands[:, 0] * self.cfg.env.episode_length_s
+        success_rate = (dis_to_origin > 0.6 * threshold_distance).float().mean().item()
+
+        # 将成功率添加到缓冲区
+        self.curriculum_success_buffer.append(success_rate)
+        evaluation_window = getattr(self.cfg.curriculum, "evaluation_window", 100)
+        if len(self.curriculum_success_buffer) > evaluation_window:
+            self.curriculum_success_buffer.pop(0)
+
+        # 检查进阶条件
+        if self.curriculum_iteration >= stage["min_iterations"]:
+            if len(self.curriculum_success_buffer) >= evaluation_window // 2:
+                avg_success = np.mean(self.curriculum_success_buffer)
+
+                if avg_success >= stage["success_threshold"]:
+                    # 进入下一阶段
+                    print(f"\n[课程学习] 阶段{self.curriculum_stage + 1}完成！")
+                    print(f"  - 训练迭代: {self.curriculum_iteration}")
+                    print(
+                        f"  - 平均成功率: {avg_success:.2%} (阈值: {stage['success_threshold']:.2%})"
+                    )
+
+                    # 切换到下一阶段
+                    self.curriculum_success_buffer.clear()
+                    self._apply_curriculum_stage(self.curriculum_stage + 1)
+
+                    # 重新生成地形（如果需要）
+                    # 注意：这里需要重新创建地形，但Isaac Gym不支持动态地形更改
+                    # 实际应用中，可以通过预先生成多个地形类型，然后在reset时选择合适的地形
+                    print(f"[课程学习] 提示：地形配置已更新，重新训练时将使用新地形")
+
+    def get_curriculum_stage_info(self):
+        """获取当前课程学习阶段信息（用于日志记录）"""
+        if not self.curriculum_enabled:
+            return None
+
+        stage = self.curriculum_stages[self.curriculum_stage]
+        return {
+            "stage_index": self.curriculum_stage,
+            "stage_name": stage["name"],
+            "iteration": self.curriculum_iteration,
+            "min_iterations": stage["min_iterations"],
+            "success_threshold": stage["success_threshold"],
+            "avg_success_rate": (
+                np.mean(self.curriculum_success_buffer)
+                if self.curriculum_success_buffer
+                else 0.0
+            ),
+        }

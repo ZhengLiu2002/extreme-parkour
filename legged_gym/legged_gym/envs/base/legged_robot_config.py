@@ -45,7 +45,11 @@ class LeggedRobotCfg(BaseConfig):
 
         n_scan = 132
         n_priv = 3 + 3 + 3
-        n_priv_latent = 4 + 1 + 12 + 12
+        # 【扩展特权观测空间】添加障碍物信息
+        # 原有: 4(mass) + 1(friction) + 12(motor_strength0) + 12(motor_strength1) = 29
+        # 新增: 12 (4个栏杆 * [delta_x, delta_y, height]) = 12
+        # 总计: 29 + 12 = 41
+        n_priv_latent = 4 + 1 + 12 + 12 + 12
         n_proprio = 3 + 2 + 3 + 4 + 36 + 5
         history_len = 10
 
@@ -87,6 +91,10 @@ class LeggedRobotCfg(BaseConfig):
         num_future_goal_obs = 2
 
     class depth:
+        # 深度相机配置
+        # 默认关闭，各个任务可以根据需要覆盖
+        # 训练Teacher（Critic）时设为False（只用特权观测）
+        # 训练Student（Actor）时设为True（使用深度图像）
         use_camera = False
         camera_num_envs = 192
         camera_terrain_num_rows = 10

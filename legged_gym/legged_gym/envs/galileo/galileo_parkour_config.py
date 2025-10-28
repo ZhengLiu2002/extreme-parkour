@@ -6,10 +6,10 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class GalileoParkourCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        num_envs = 1024  # 训练环境数量
+        num_envs = 512  # 训练环境数量
 
     class terrain(LeggedRobotCfg.terrain):
-        num_rows = 10  # 难度等级数量（200mm→500mm递进）
+        num_rows = 8  # 难度等级数量（200mm→500mm递进）
         num_cols = 4  # 只有1种地形类型（h_hurdle）
 
     class init_state(LeggedRobotCfg.init_state):
@@ -33,7 +33,7 @@ class GalileoParkourCfg(LeggedRobotCfg):
         control_type = "P"  # PD控制器类型
         # 增强关节刚度以提高稳定性
         stiffness = {"joint": 50.0}  # [N*m/rad] - 提高刚度，增强稳定性
-        damping = {"joint": 1.5}  # [N*m*s/rad] - 提高阻尼，减少震荡
+        damping = {"joint": 1.5}  # [N*m*s/rad] - 提高阻尼以匹配高刚度，防止振荡
         action_scale = 0.25  # 动作缩放系数
         decimation = 4  # 控制频率降采样
 
@@ -48,34 +48,30 @@ class GalileoParkourCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         class scales:
             # ============ 核心任务奖励 ============
-            tracking_goal_vel = 1.5  # 跟踪目标速度
-            tracking_yaw = 0.5  # 跟踪偏航角
+            tracking_goal_vel = 1.5  # 跟踪目标速度 - 激励机器人快速通过障碍
+            tracking_yaw = 0.5  # 跟踪偏航角 - 保持正确方向
 
-            # ============ 高度和姿态稳定（关键！）============
-            base_height = 3.0  # 【新增】强力约束高度跟踪（替代base_height_stability和low_posture_reward）
-            no_fly = -4.0  # 【新增】强力惩罚z轴速度，防止抖动
-            orientation = -1.5  # 惩罚姿态翻滚（保留，因为与ang_vel_xy互补）
-            ang_vel_xy = -0.05  # 轻微惩罚角速度（保留，用于阻尼）
+            # ============ 高度和姿态稳定 ============
+            base_height_regional = 0.5  # 【优化】降低权重，避免机器人躺平也能获得高奖励
+            no_fly = -0.5  # 【修改】大幅减弱！只惩罚持续的正向Z速度，允许短暂跳跃
+            orientation = -1.5  # 惩罚姿态翻滚（防止摔倒）
+            ang_vel_xy = -0.05  # 轻微惩罚角速度（阻尼效果）
 
-            # ============ 动作平滑性（简化）============
-            action_rate = -0.15  # 惩罚动作变化率（提高权重，增强平滑性）
+            # ============ 动作平滑性 ============
+            action_rate = -0.15  # 惩罚动作变化率（增强平滑性）
             dof_acc = -2.5e-7  # 惩罚关节加速度
-            dof_error = -0.05  # 惩罚关节偏离默认姿态（略微提高）
+            dof_error = -0.05  # 惩罚关节偏离默认姿态
 
-            # ============ 碰撞和接触 ============
+            # ============ 碰撞和接触（核心约束！）============
             collision = -10.0  # 惩罚非足部碰撞
-            body_obstacle_contact = -10.0  # 惩罚机器人身体与立柱接触
+            body_obstacle_contact = (
+                -1.0
+            )  # 【提高惩罚】这是核心约束，必须不惜一切代价避免碰撞
             feet_stumble = -1.0  # 惩罚脚碰到垂直面
             feet_edge = -1.0  # 惩罚脚碰到边缘
             feet_contact_forces = -0.01  # 轻微惩罚过大的脚部接触力
 
-            # ============ 钻过栏杆相关 ============
-            virtual_crossbar_penalty = -8.0  # 惩罚机器人身体高度超过虚拟横杆
-            strategy_efficiency = 1.5  # 奖励根据栏杆高度选择合适姿态
-            obstacle_approach_speed = 0.5  # 奖励接近障碍物时的合理速度
-            stable_crawl = 1.0  # 奖励稳定钻行
-
-            # ============ 其他 ============
+            # ============ 基本激励 ============
             stand_still = -0.5  # 惩罚静止不动
             alive_bonus = 0.5  # 存活奖励
 
@@ -95,6 +91,9 @@ class GalileoParkourCfg(LeggedRobotCfg):
         max_contact_force_penalty = 2.0  # 最大接触力惩罚倍数
         enable_contact_force_logging = True  # 是否启用接触力日志输出
 
+        # 区域感知高度奖励参数
+        obstacle_safe_distance = 1.0  # 障碍物"安全距离" [m]：超过此距离激活平地高度奖励
+
     class commands(LeggedRobotCfg.commands):
         curriculum = False  # 速度指令课程学习
         num_commands = 4  # 指令数量
@@ -108,9 +107,14 @@ class GalileoParkourCfg(LeggedRobotCfg):
             heading = [0, 0]
 
     class depth(LeggedRobotCfg.depth):
-        """深度相机配置（学生网络使用）"""
-
-        use_camera = False  # 训练教师网络时为False，训练学生网络时改为True
+        # 【重要】训练策略：
+        # 阶段1（Teacher训练）: use_camera = False
+        #   - Critic使用特权观测（包括障碍物绝对位置）
+        #   - Actor学习基础运动模式
+        # 阶段2（Student训练）: use_camera = True
+        #   - Actor使用深度相机替代特权观测
+        #   - Critic仍然使用特权观测指导训练
+        use_camera = False  # 当前处于Teacher训练阶段
         camera_num_envs = 32  # 使用深度相机的环境数量
 
         # 优化相机位置和角度
@@ -136,27 +140,10 @@ class GalileoParkourCfg(LeggedRobotCfg):
         }
         terrain_proportions = list(terrain_dict.values())
         num_goals = 8  # 目标点数量（起点+4个栏杆+终点+额外2个）
-        curriculum = True  # 启用课程学习（逐渐增加栏杆高度）
-
-    class curriculum:
-        """课程学习配置：逐步增加难度"""
-
-        # 障碍物高度课程（从低到高）
-        obstacle_height_start = 0.15  # 起始高度 [m]
-        obstacle_height_end = 0.50  # 最终高度 [m]
-        obstacle_height_increment = 0.05  # 每次增加 [m]
-
-        # 障碍物数量课程（从少到多）
-        num_obstacles_start = 2  # 起始障碍物数量
-        num_obstacles_end = 4  # 最终障碍物数量
-
-        # 障碍物间距课程（从远到近）
-        obstacle_spacing_start = [2.5, 3.0]  # 起始间距范围 [m]
-        obstacle_spacing_end = [1.5, 2.5]  # 最终间距范围 [m]
-
-        # 课程推进条件
-        success_rate_threshold = 0.7  # 成功率达到70%时进入下一阶段
-        min_episodes_per_stage = 500  # 每个阶段最少训练episode数
+        # 【修复】启用 Isaac Gym 默认的课程学习机制
+        # terrain_levels (行) 会映射到 difficulty (0.0-1.0)
+        # terrain.py 中的 make_terrain 将根据 difficulty 调整栏杆高度
+        curriculum = True
 
 
 class GalileoParkourCfgPPO(LeggedRobotCfgPPO):
