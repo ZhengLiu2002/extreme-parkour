@@ -1512,9 +1512,9 @@ class LeggedRobot(BaseTask):
                 robot_asset,
                 start_pose,
                 "anymal",
-                i,
-                self.cfg.asset.self_collisions,
-                0,
+                i,  # 每个环境使用独立的碰撞组，隔离不同环境的Actor
+                self.cfg.asset.self_collisions,  # collision filter: 与filter包含相同bit的对象碰撞（障碍物filter=1）
+                0,  # self_collisions=0: 禁用机器人肢体间的自碰撞
             )
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_handle, anymal_handle, dof_props)
@@ -1964,9 +1964,9 @@ class LeggedRobot(BaseTask):
             cylinder_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 使用env_id启用物理碰撞
-            1,  # collision filter: 启用与机器人的硬碰撞（显存开销=0）
-            0,  # segmentation id
+            env_id,  # 障碍物与所属环境的机器人在同一碰撞组
+            1,  # collision filter = 1: 与filter包含bit0的对象碰撞（机器人filter=1）
+            0,  # self_collisions=0: 障碍物无自碰撞
         )
 
         # 存储actor句柄，便于后续管理
@@ -2019,9 +2019,9 @@ class LeggedRobot(BaseTask):
             box_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 使用env_id启用物理碰撞
-            1,  # collision filter: 启用与机器人的硬碰撞（显存开销=0）
-            0,  # segmentation id
+            env_id,  # 障碍物与所属环境的机器人在同一碰撞组
+            1,  # collision filter = 1: 与filter包含bit0的对象碰撞（机器人filter=1）
+            0,  # self_collisions=0: 障碍物无自碰撞
         )
 
         # 存储actor句柄，便于后续管理
@@ -3171,75 +3171,86 @@ class LeggedRobot(BaseTask):
         # 简单地返回全1，表示所有存活的机器人都获得奖励
         return torch.ones(self.num_envs, dtype=torch.float, device=self.device)
 
-    def _reward_base_height_regional(self):
+    def _reward_strategic_height(self):
         """
-        【核心创新】区域感知的高度奖励
+        【核心创新】智能高度奖励：根据障碍物高度自主决策跳跃或钻爬
 
         设计理念：
-        - 在平地区域（远离障碍物）：激活高度奖励，鼓励机器人使用base_height_normal高效行走
-        - 在障碍物附近：完全不施加高度奖励/惩罚，将决策权交给机器人自主探索
+        - 在平地区域：奖励正常站立高度（0.35m）
+        - 靠近高栏杆（>=0.35m）：奖励爬行姿态（0.25m）
+        - 靠近低栏杆（<0.35m）：不施加高度奖励，让机器人自由探索跳跃
 
         这样设计的好处：
-        1. 解决"平地站立"问题：在平地上机器人会学会稳定行走
-        2. 保留策略自由度：在障碍物附近不强制任何高度，机器人可以自由选择跳跃或钻爬
-        3. 主要驱动力来自body_obstacle_contact惩罚：碰到障碍物会受到强惩罚，迫使机器人学习合适策略
+        1. 在平地上机器人学会稳定行走
+        2. 面对高栏杆时学会钻爬（避免碰撞）
+        3. 面对低栏杆时自由探索跳跃（no_fly惩罚已大幅减弱）
+        4. 策略完全由奖励引导，无需人工规则
         """
-        # 获取当前基座高度
-        robot_z = self.root_states[:, 2]
-        ground_z = self.env_origins[:, 2]
-        current_height = robot_z - ground_z
-
-        # 平地正常行走高度
+        # 1. 获取平地站立和爬行目标
         normal_target = getattr(self.cfg.rewards, "base_height_normal", 0.35)
+        crawl_target = getattr(self.cfg.rewards, "base_height_target", 0.25)
 
-        # 障碍物安全距离（超过此距离才激活高度奖励）
-        safe_distance = getattr(self.cfg.rewards, "obstacle_safe_distance", 1.0)
+        # 2. 获取当前基座高度
+        current_height = self.root_states[:, 2] - self.env_origins[:, 2]
 
-        # 计算每个环境到最近障碍物的距离
-        min_dist_to_obstacle = (
-            torch.ones(self.num_envs, dtype=torch.float, device=self.device) * 999.0
+        # 3. 获取最近障碍物信息（使用特权观测）
+        # self.static_hurdle_info 存储了 (N, 4, 3) 的 [x, y, height]
+        robot_pos_xy = self.root_states[:, :2]
+        hurdle_abs_pos_xy = self.static_hurdle_info[:, :, :2]
+        hurdle_heights = self.static_hurdle_info[:, :, 2]  # (N, 4)
+
+        # 计算机器人到所有栏杆的X轴（前向）距离
+        # (N, 1, 2) - (N, 4, 2) -> (N, 4, 2)
+        relative_pos = hurdle_abs_pos_xy - robot_pos_xy.unsqueeze(1)
+        forward_distance = relative_pos[:, :, 0]  # (N, 4)
+
+        # 找到即将面对的障碍物（X距离为正且最小）
+        forward_distance = forward_distance.clone()
+        forward_distance[forward_distance <= 0.0] = 999.0  # 忽略已通过的
+
+        # (N,)
+        min_dist_to_hurdle, min_dist_indices = torch.min(forward_distance, dim=1)
+
+        # (N,)
+        nearest_hurdle_height = hurdle_heights[
+            torch.arange(self.num_envs, device=self.device), min_dist_indices
+        ]
+
+        # 4. 定义奖励逻辑
+
+        # 4.1. 奖励平地站立 (高斯奖励)
+        reward_normal = torch.exp(-torch.abs(current_height - normal_target) * 15.0)
+
+        # 4.2. 奖励钻爬 (高斯奖励)
+        reward_crawl = torch.exp(-torch.abs(current_height - crawl_target) * 20.0)
+
+        # 5. 定义策略阈值
+        detection_range = 1.5  # 栏杆前方 1.5m 开始决策
+        jump_threshold = 0.35  # 低于 0.35m 的栏杆，机器人应该跳
+
+        # 6. 根据情况应用不同奖励
+
+        # 6.1. 在平地区域 (远离栏杆)
+        is_on_flat = min_dist_to_hurdle > detection_range
+
+        # 6.2. 靠近高栏杆 (必须钻爬)
+        is_near_high_hurdle = (min_dist_to_hurdle <= detection_range) & (
+            nearest_hurdle_height >= jump_threshold
         )
 
-        if (
-            hasattr(self.terrain, "virtual_crossbars")
-            and len(self.terrain.virtual_crossbars) > 0
-        ):
-            robot_pos = self.root_states[:, :3]
-            rel_pos = robot_pos - self.env_origins
+        # 6.3. 靠近低栏杆 (必须跳跃)
+        is_near_low_hurdle = (min_dist_to_hurdle <= detection_range) & (
+            nearest_hurdle_height < jump_threshold
+        )
 
-            for crossbar in self.terrain.virtual_crossbars:
-                crossbar_x = crossbar["x"]
-                crossbar_y = crossbar["y"]
-                crossbar_width = crossbar["width"]
-                crossbar_depth = crossbar["depth"]
-
-                # 计算到横杆中心的距离
-                x_distance = torch.abs(rel_pos[:, 0] - crossbar_x)
-                y_distance = torch.abs(rel_pos[:, 1] - crossbar_y)
-
-                # 只考虑在通道内的情况（Y方向在栏杆范围内）
-                in_channel = y_distance < (crossbar_width / 2 + 0.3)
-
-                # 计算X方向距离（前后距离）
-                dist_to_crossbar = torch.where(
-                    in_channel, x_distance, torch.tensor(999.0, device=self.device)
-                )
-
-                # 更新最小距离
-                min_dist_to_obstacle = torch.min(min_dist_to_obstacle, dist_to_crossbar)
-
-        # 计算区域系数：远离障碍物时为1，靠近时平滑降为0
-        # 使用平滑的sigmoid函数进行过渡
-        regional_weight = torch.sigmoid((min_dist_to_obstacle - safe_distance) / 0.3)
-
-        # 计算高度误差
-        height_error = torch.abs(current_height - normal_target)
-
-        # 使用高斯奖励，只在平地区域生效
-        base_reward = torch.exp(-height_error * 15.0)
-
-        # 应用区域权重
-        reward = base_reward * regional_weight
+        # 组合奖励：
+        # 在平地，使用 normal 奖励
+        # 靠近高栏杆，使用 crawl 奖励
+        # 靠近低栏杆，奖励 0 (让它自由探索，此时'no_fly'惩罚很低，它会去尝试跳跃)
+        reward = torch.zeros_like(current_height)
+        reward[is_on_flat] = reward_normal[is_on_flat]
+        reward[is_near_high_hurdle] = reward_crawl[is_near_high_hurdle]
+        # is_near_low_hurdle 保持为 0
 
         return reward
 
