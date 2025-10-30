@@ -1250,7 +1250,6 @@ class LeggedRobot(BaseTask):
                 self.cfg.depth.resized[0],
             ).to(self.device)
 
-        # 【新增】初始化障碍物信息张量
         # 用于存储每个环境的4个栏杆的绝对世界坐标和高度 [abs_x, abs_y, height]
         # shape: (num_envs, 4, 3)
         # 这个信息将在 reset_idx 中更新，并在 compute_observations 中用于计算相对位置
@@ -1507,15 +1506,51 @@ class LeggedRobot(BaseTask):
                 rigid_shape_props_asset, i
             )
             self.gym.set_asset_rigid_shape_properties(robot_asset, rigid_shape_props)
+            # 使用更大的filter值确保碰撞生效
+            robot_collision_filter = -1  # 使用-1作为全1位掩码（32位有符号整数）
+            if i == 0:  # 只在第一个环境打印，避免过多输出
+                print(f"[DEBUG] 创建机器人 Actor (env={i}):")
+                print(f"  - collision_group = {i}")
+                print(
+                    f"  - collision_filter = {robot_collision_filter} (二进制全1，32位整数)"
+                )
+                # 检查资产的形状数量
+                num_shapes = self.gym.get_asset_rigid_shape_count(robot_asset)
+                print(f"  - 机器人资产碰撞形状数量: {num_shapes}")
+
+            # Isaac Gym API: create_actor(env, asset, pose, name, group, filter, segmentationId)
+            # group: 碰撞组，相同组的actor会碰撞
+            # filter: 碰撞过滤器（位掩码），按位与结果非零时才能碰撞
+            # segmentationId: 分割ID，用于可视化，不影响碰撞
             anymal_handle = self.gym.create_actor(
                 env_handle,
                 robot_asset,
                 start_pose,
                 "anymal",
-                i,  # 每个环境使用独立的碰撞组，隔离不同环境的Actor
-                self.cfg.asset.self_collisions,  # collision filter: 与filter包含相同bit的对象碰撞（障碍物filter=1）
-                0,  # self_collisions=0: 禁用机器人肢体间的自碰撞
+                i,  # group: 每个环境使用独立的碰撞组，隔离不同环境的Actor
+                robot_collision_filter,  # filter: 使用全1位掩码确保碰撞
+                0,  # segmentationId: 分割ID（用于可视化）
             )
+
+            # 验证创建后的actor属性（仅第一个环境）
+            if i == 0:
+                # 获取actor的刚体数量
+                num_bodies = self.gym.get_actor_rigid_body_count(
+                    env_handle, anymal_handle
+                )
+                print(f"  - 机器人Actor刚体数量: {num_bodies}")
+                # 获取actor的碰撞形状数量
+                num_actor_shapes = 0
+                for body_idx in range(num_bodies):
+                    body_shape_props = self.gym.get_actor_rigid_shape_properties(
+                        env_handle, anymal_handle
+                    )
+                    if body_idx < len(body_shape_props):
+                        num_actor_shapes += 1
+                print(
+                    f"  - 机器人Actor碰撞形状数量: {len(body_shape_props) if num_bodies > 0 else 0}"
+                )
+
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_handle, anymal_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(
@@ -1908,6 +1943,25 @@ class LeggedRobot(BaseTask):
                     vertical=False,
                 )
 
+        # 障碍物创建完成后的总结（仅第一个环境）
+        if env_id == 0 and hurdles_world:
+            num_hurdles = len(hurdles_world)
+            num_obstacles = (
+                num_hurdles * 4
+            )  # 每个hurdle有4个组件：2个立柱 + 1个横梁 + 可选的底部横杆
+            print(f"[DEBUG] 环境{env_id}障碍物创建完成:")
+            print(f"  - H型栏杆数量: {num_hurdles}")
+            print(f"  - 总障碍物组件数: {num_obstacles}")
+            print(
+                f"  - 所有障碍物使用: collision_group={env_id}, collision_filter=-1 (全1位掩码)"
+            )
+            print(
+                f"  - 机器人使用: collision_group={env_id}, collision_filter=-1 (全1位掩码)"
+            )
+            print(
+                f"  - 碰撞配置验证: 机器人和障碍物在同一group且filter匹配（-1 & -1 = -1 ≠ 0），应该能碰撞 ✓"
+            )
+
     def _add_cylinder_geometry(
         self, env_handle, env_id, pos, radius, length, color, vertical=True
     ):
@@ -1959,15 +2013,43 @@ class LeggedRobot(BaseTask):
             cylinder_asset = self.hurdle_asset_cache[key]
 
         # 5. 使用缓存的资产创建演员 (Actor)
+        # 关键：障碍物使用与机器人相同的collision_group，确保它们在同一个环境中能碰撞
+        # 使用全1的filter值（0xFFFFFFFF）确保碰撞检测生效
+        obstacle_collision_filter = -1  # 使用-1作为全1位掩码（32位有符号整数）
+
+        # 调试信息：检查资产的碰撞形状
+        num_shapes = self.gym.get_asset_rigid_shape_count(cylinder_asset)
+        if env_id == 0:  # 只在第一个环境打印，避免过多输出
+            print(f"[DEBUG] 创建圆柱障碍物 (env={env_id}):")
+            print(f"  - collision_group = {env_id}")
+            print(
+                f"  - collision_filter = {obstacle_collision_filter} (二进制全1，32位整数)"
+            )
+            print(f"  - self_collisions = 0")
+            print(f"  - 圆柱资产碰撞形状数量: {num_shapes}")
+            print(f"  - 位置: ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
+            print(f"  - 半径: {radius:.3f}, 长度: {length:.3f}")
+
         actor_handle = self.gym.create_actor(
             env_handle,
             cylinder_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 障碍物与所属环境的机器人在同一碰撞组
-            1,  # collision filter = 1: 与filter包含bit0的对象碰撞（机器人filter=1）
+            env_id,  # collision_group=env_id: 与机器人使用相同的碰撞组，确保能碰撞
+            obstacle_collision_filter,  # collision filter: 使用全1位掩码确保碰撞
             0,  # self_collisions=0: 障碍物无自碰撞
         )
+
+        # 验证创建后的actor属性（仅第一个环境）
+        if env_id == 0:
+            num_bodies = self.gym.get_actor_rigid_body_count(env_handle, actor_handle)
+            body_shape_props = self.gym.get_actor_rigid_shape_properties(
+                env_handle, actor_handle
+            )
+            print(f"  - 圆柱障碍物Actor刚体数量: {num_bodies}")
+            print(f"  - 圆柱障碍物Actor碰撞形状数量: {len(body_shape_props)}")
+            if len(body_shape_props) > 0:
+                print(f"  - 第一个形状类型: {type(body_shape_props[0])}")
 
         # 存储actor句柄，便于后续管理
         self.static_obstacle_handles.append(actor_handle)
@@ -2014,15 +2096,43 @@ class LeggedRobot(BaseTask):
             box_asset = self.hurdle_asset_cache[key]
 
         # 5. 使用缓存的资产创建演员 (Actor)
+        # 关键：障碍物使用与机器人相同的collision_group，确保它们在同一个环境中能碰撞
+        # 使用全1的filter值（0xFFFFFFFF）确保碰撞检测生效
+        obstacle_collision_filter = -1  # 使用-1作为全1位掩码（32位有符号整数）
+
+        # 调试信息：检查资产的碰撞形状
+        num_shapes = self.gym.get_asset_rigid_shape_count(box_asset)
+        if env_id == 0:  # 只在第一个环境打印，避免过多输出
+            print(f"[DEBUG] 创建长方体障碍物 (env={env_id}):")
+            print(f"  - collision_group = {env_id}")
+            print(
+                f"  - collision_filter = {obstacle_collision_filter} (二进制全1，32位整数)"
+            )
+            print(f"  - self_collisions = 0")
+            print(f"  - 长方体资产碰撞形状数量: {num_shapes}")
+            print(f"  - 位置: ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
+            print(f"  - 尺寸: X={length_x:.3f}, Y={length_y:.3f}, Z={length_z:.3f}")
+
         actor_handle = self.gym.create_actor(
             env_handle,
             box_asset,  # <-- 使用缓存的 asset
             pose,
             "h_hurdle_static",
-            env_id,  # 障碍物与所属环境的机器人在同一碰撞组
-            1,  # collision filter = 1: 与filter包含bit0的对象碰撞（机器人filter=1）
+            env_id,  # collision_group=env_id: 与机器人使用相同的碰撞组，确保能碰撞
+            obstacle_collision_filter,  # collision filter: 使用全1位掩码确保碰撞
             0,  # self_collisions=0: 障碍物无自碰撞
         )
+
+        # 验证创建后的actor属性（仅第一个环境）
+        if env_id == 0:
+            num_bodies = self.gym.get_actor_rigid_body_count(env_handle, actor_handle)
+            body_shape_props = self.gym.get_actor_rigid_shape_properties(
+                env_handle, actor_handle
+            )
+            print(f"  - 长方体障碍物Actor刚体数量: {num_bodies}")
+            print(f"  - 长方体障碍物Actor碰撞形状数量: {len(body_shape_props)}")
+            if len(body_shape_props) > 0:
+                print(f"  - 第一个形状类型: {type(body_shape_props[0])}")
 
         # 存储actor句柄，便于后续管理
         self.static_obstacle_handles.append(actor_handle)
